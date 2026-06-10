@@ -1,0 +1,91 @@
+{
+  "version": "1",
+  "name": "Add JSON-Schema validation to workflow loader",
+  "description": "Beispiel-Workflow: zeigt alle Slots inkl. mehrerer acceptance-Checks, Modell-Routing und DAG-Abhaengigkeiten. Drei Knoten: implementieren -> testen -> dokumentieren.",
+  "defaults": {
+    "model": "sonnet",
+    "kind": "command",
+    "cwd": "."
+  },
+  "nodes": [
+    {
+      "id": "implement-validator",
+      "title": "Validator implementieren",
+      "goal": "Eine Funktion validateWorkflow(obj) bauen, die ein Workflow-Objekt gegen schema/workflow.schema.json prueft und bei Fehlern eine lesbare Exception wirft.",
+      "inputs": [
+        "schema/workflow.schema.json",
+        "src/loader.ts"
+      ],
+      "constraints": [
+        "Keine neuen Runtime-Dependencies ausser einem JSON-Schema-Validator",
+        "Nur src/ anfassen"
+      ],
+      "acceptance": [
+        {
+          "description": "TypeScript kompiliert ohne Fehler",
+          "command": "npm run typecheck",
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "description": "validateWorkflow ist exportiert",
+          "command": "grep -rn 'export function validateWorkflow' src/",
+          "expect": { "exitCode": 0, "stdoutMatches": "validateWorkflow" }
+        }
+      ],
+      "comments": "Ajv ist erlaubt, da es draft 2020-12 unterstuetzt.",
+      "model": "sonnet",
+      "kind": "command"
+    },
+    {
+      "id": "test-validator",
+      "title": "Validator testen",
+      "goal": "Unit-Tests fuer validateWorkflow: ein gueltiger und mehrere ungueltige Workflows (fehlendes acceptance, leeres expect, falsche node-id).",
+      "inputs": [
+        "src/loader.ts",
+        "examples/example-workflow.json"
+      ],
+      "constraints": [
+        "Tests muessen ohne Netzwerk laufen"
+      ],
+      "acceptance": [
+        {
+          "description": "Alle Tests gruen",
+          "command": "npm test",
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "description": "Keine offenen TODOs in den Testdateien",
+          "command": "grep -rc 'TODO' src/loader.test.ts",
+          "expect": { "stdoutMatches": "^0$" }
+        }
+      ],
+      "model": "sonnet"
+    },
+    {
+      "id": "document-schema",
+      "title": "Schema dokumentieren",
+      "goal": "README-Abschnitt schreiben, der das Workflow-Datenmodell und den acceptance-Check erklaert, mit einem Minimalbeispiel.",
+      "inputs": [
+        "schema/workflow.schema.json",
+        "README.md"
+      ],
+      "constraints": [
+        "Markdown, konsistent mit bestehendem README-Stil"
+      ],
+      "acceptance": [
+        {
+          "description": "README erwaehnt acceptance-Check",
+          "command": "grep -ic 'acceptance' README.md",
+          "expect": { "stdoutNotMatches": "^0$" }
+        }
+      ],
+      "comments": "Dieser Knoten ist textlastig und billig -- bewusst als 'local' geroutet zum Kostentest.",
+      "model": "local",
+      "kind": "agent"
+    }
+  ],
+  "edges": [
+    { "from": "implement-validator", "to": "test-validator", "label": "Code muss stehen" },
+    { "from": "test-validator", "to": "document-schema", "label": "erst gruen, dann doku" }
+  ]
+}

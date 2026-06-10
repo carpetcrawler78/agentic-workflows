@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/carpetcrawler78/agentic-workflows/schema/workflow.schema.json",
+  "title": "Agentic Workflow",
+  "description": "Ein Dev-Workflow als DAG. Knoten sind verifizierbar geschnittene Tasks, die von Claude Code (oder kompatiblen Agenten) abgearbeitet werden. Kern jedes Knotens ist der ausfuehrbare acceptance-Check.",
+  "type": "object",
+  "required": ["version", "name", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Schema-Version dieses Workflow-Formats.",
+      "const": "1"
+    },
+    "name": {
+      "description": "Kurzer, menschenlesbarer Name des Workflows.",
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "description": "Optionale laengere Beschreibung des Workflow-Ziels.",
+      "type": "string"
+    },
+    "defaults": {
+      "description": "Workflow-weite Default-Werte, die einzelne Knoten ueberschreiben koennen.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": { "$ref": "#/$defs/model" },
+        "kind": { "$ref": "#/$defs/nodeKind" },
+        "cwd": {
+          "description": "Default-Arbeitsverzeichnis fuer acceptance-Kommandos (relativ zum Repo-Root).",
+          "type": "string"
+        }
+      }
+    },
+    "nodes": {
+      "description": "Die Knoten des DAG. Jeder Knoten ist ein verifizierbar abschliessbarer Task.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "description": "Gerichtete Kanten: definieren Reihenfolge und Abhaengigkeiten (from muss vor to fertig sein).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+  "$defs": {
+    "nodeId": {
+      "description": "Eindeutige Knoten-ID, kebab-case. Wird als Dateiname beim Export verwendet.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "model": {
+      "description": "Modell-Hint fuers Kosten-Routing: teurer Planer, billiger Worker. 'planner' = staerkstes Modell, 'sonnet' = Worker-Sweet-Spot, 'local' = lokales Mini-LLM (nur Trivial-Tasks).",
+      "enum": ["planner", "sonnet", "local"],
+      "default": "sonnet"
+    },
+    "nodeKind": {
+      "description": "Export-Granularitaet: 'command' = ein Slash-Command (.claude/commands/<id>.md), 'agent' = eine Sub-Agent-Definition (.claude/agents/<id>.md).",
+      "enum": ["command", "agent"],
+      "default": "command"
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "goal", "acceptance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/nodeId" },
+        "title": {
+          "description": "Kurzer Anzeigename fuer die Canvas.",
+          "type": "string"
+        },
+        "goal": {
+          "description": "Ziel: was dieser Knoten erreichen soll. Wird zur Prompt-Grundlage.",
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "description": "Inputs/Kontext, die der Agent braucht: Dateipfade, Doku-Verweise, vorherige Outputs.",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "constraints": {
+          "description": "Harte Randbedingungen (z.B. 'keine neuen Dependencies', 'nur src/ anfassen').",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "acceptance": {
+          "description": "Ausfuehrbare Abnahmekriterien. ALLE Checks muessen bestehen, damit der Knoten als fertig gilt. Mindestens einer ist Pflicht -- das ist der Hebel, der Stufe-2-Autonomie ueberhaupt ermoeglicht. Kleiner Knoten = ein Check, grosser Knoten = mehrere.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/check" }
+        },
+        "comments": {
+          "description": "Freitext-Notizen/Hinweise fuer den Agenten oder den menschlichen Reviewer.",
+          "type": "string"
+        },
+        "model": { "$ref": "#/$defs/model" },
+        "kind": { "$ref": "#/$defs/nodeKind" }
+      }
+    },
+    "check": {
+      "description": "Ein ausfuehrbarer Check: Shell-Kommando + erwartetes Ergebnis. Gilt als bestanden, wenn ALLE gesetzten expect-Bedingungen zutreffen.",
+      "type": "object",
+      "required": ["command", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "Menschenlesbare Beschreibung, was dieser Check prueft (z.B. 'Tests gruen').",
+          "type": "string"
+        },
+        "command": {
+          "description": "Shell-Kommando, das ausgefuehrt wird. Sollte deterministisch und ohne Seiteneffekte ausserhalb des Repos sein.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": {
+          "description": "Arbeitsverzeichnis fuer dieses Kommando (relativ zum Repo-Root). Default: defaults.cwd oder Repo-Root.",
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "description": "Maximale Laufzeit des Kommandos in Sekunden.",
+          "type": "integer",
+          "minimum": 1,
+          "default": 120
+        },
+        "expect": {
+          "description": "Erwartetes Ergebnis. Mindestens eine Bedingung muss gesetzt sein. Mehrere Bedingungen sind UND-verknuepft.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "exitCode": {
+              "description": "Erwarteter Exit-Code des Kommandos.",
+              "type": "integer",
+              "default": 0
+            },
+            "stdoutMatches": {
+              "description": "Regex (ECMA), der irgendwo in stdout matchen muss.",
+              "type": "string"
+            },
+            "stdoutNotMatches": {
+              "description": "Regex (ECMA), der NICHT in stdout matchen darf (z.B. '(?i)error').",
+              "type": "string"
+            },
+            "stderrMatches": {
+              "description": "Regex (ECMA), der irgendwo in stderr matchen muss.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/nodeId" },
+        "to": { "$ref": "#/$defs/nodeId" },
+        "label": {
+          "description": "Optionales Kanten-Label fuer die Canvas-Darstellung.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
