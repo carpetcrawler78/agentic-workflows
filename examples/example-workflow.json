@@ -1,7 +1,7 @@
 {
   "version": "1",
   "name": "Add JSON-Schema validation to workflow loader",
-  "description": "Beispiel-Workflow: zeigt alle Slots inkl. mehrerer acceptance-Checks, Modell-Routing und DAG-Abhaengigkeiten. Drei Knoten: implementieren -> testen -> dokumentieren.",
+  "description": "Beispiel-Workflow: zeigt alle Slots inkl. mehrerer acceptance-Checks, Modell-Routing und DAG-Abhaengigkeiten. Drei Knoten: implementieren -> testen -> dokumentieren. Stack: Python.",
   "defaults": {
     "model": "sonnet",
     "kind": "command",
@@ -11,51 +11,44 @@
     {
       "id": "implement-validator",
       "title": "Validator implementieren",
-      "goal": "Eine Funktion validateWorkflow(obj) bauen, die ein Workflow-Objekt gegen schema/workflow.schema.json prueft und bei Fehlern eine lesbare Exception wirft.",
-      "inputs": [
-        "schema/workflow.schema.json",
-        "src/loader.ts"
-      ],
+      "goal": "Eine Funktion validate_workflow(obj) bauen, die ein Workflow-Objekt gegen schema/workflow.schema.json prueft und bei Fehlern eine lesbare WorkflowValidationError wirft.",
+      "inputs": ["schema/workflow.schema.json", "src/loader.py"],
       "constraints": [
-        "Keine neuen Runtime-Dependencies ausser einem JSON-Schema-Validator",
-        "Nur src/ anfassen"
+        "Keine neuen Runtime-Dependencies ausser jsonschema",
+        "Nur src/ anfassen",
+        "Indentation 4 Spaces, nie Tabs"
       ],
       "acceptance": [
         {
-          "description": "TypeScript kompiliert ohne Fehler",
-          "command": "npm run typecheck",
+          "description": "Modul kompiliert ohne Syntaxfehler",
+          "command": "python -m py_compile src/loader.py",
           "expect": { "exitCode": 0 }
         },
         {
-          "description": "validateWorkflow ist exportiert",
-          "command": "grep -rn 'export function validateWorkflow' src/",
-          "expect": { "exitCode": 0, "stdoutMatches": "validateWorkflow" }
+          "description": "validate_workflow ist definiert",
+          "command": "grep -rn 'def validate_workflow' src/",
+          "expect": { "exitCode": 0, "stdoutMatches": "validate_workflow" }
         }
       ],
-      "comments": "Ajv ist erlaubt, da es draft 2020-12 unterstuetzt.",
+      "comments": "jsonschema ist erlaubt, da es Draft 2020-12 via Draft202012Validator unterstuetzt.",
       "model": "sonnet",
       "kind": "command"
     },
     {
       "id": "test-validator",
       "title": "Validator testen",
-      "goal": "Unit-Tests fuer validateWorkflow: ein gueltiger und mehrere ungueltige Workflows (fehlendes acceptance, leeres expect, falsche node-id).",
-      "inputs": [
-        "src/loader.ts",
-        "examples/example-workflow.json"
-      ],
-      "constraints": [
-        "Tests muessen ohne Netzwerk laufen"
-      ],
+      "goal": "pytest-Tests fuer validate_workflow: ein gueltiger und mehrere ungueltige Workflows (fehlendes acceptance, leeres expect, falsche node-id).",
+      "inputs": ["src/loader.py", "examples/example-workflow.json"],
+      "constraints": ["Tests muessen ohne Netzwerk laufen"],
       "acceptance": [
         {
           "description": "Alle Tests gruen",
-          "command": "npm test",
+          "command": "pytest -q",
           "expect": { "exitCode": 0 }
         },
         {
           "description": "Keine offenen TODOs in den Testdateien",
-          "command": "grep -rc 'TODO' src/loader.test.ts",
+          "command": "grep -rc 'TODO' tests/test_loader.py",
           "expect": { "stdoutMatches": "^0$" }
         }
       ],
@@ -65,13 +58,8 @@
       "id": "document-schema",
       "title": "Schema dokumentieren",
       "goal": "README-Abschnitt schreiben, der das Workflow-Datenmodell und den acceptance-Check erklaert, mit einem Minimalbeispiel.",
-      "inputs": [
-        "schema/workflow.schema.json",
-        "README.md"
-      ],
-      "constraints": [
-        "Markdown, konsistent mit bestehendem README-Stil"
-      ],
+      "inputs": ["schema/workflow.schema.json", "README.md"],
+      "constraints": ["Markdown, konsistent mit bestehendem README-Stil"],
       "acceptance": [
         {
           "description": "README erwaehnt acceptance-Check",
