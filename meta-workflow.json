@@ -1,0 +1,122 @@
+{
+  "version": "1",
+  "name": "Meta-Workflow: agentic-workflows Weiterentwicklung",
+  "description": "Dogfooding-Artefakt: die naechsten Ausbaustufen des Tools selbst, als Workflow-Instanz. Knoten beschreiben zukuenftige Arbeit -- ihre acceptance-Checks sind heute erwartbar rot, bis die Features umgesetzt sind.",
+  "defaults": {
+    "model": "sonnet",
+    "kind": "command",
+    "cwd": "."
+  },
+  "nodes": [
+    {
+      "id": "unify-cli",
+      "title": "CLI vereinheitlichen",
+      "goal": "Gemeinsamen Entrypoint src/cli.py bauen, der validate/export/run als Subcommands ueber 'python -m src.cli ...' buendelt.",
+      "inputs": ["src/loader.py", "src/runner.py", "README.md"],
+      "constraints": ["Keine neuen Dependencies", "Nur src/ anfassen"],
+      "acceptance": [
+        {
+          "description": "Modul kompiliert ohne Syntaxfehler",
+          "command": "python -m py_compile src/cli.py",
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "description": "main-Funktion ist definiert",
+          "command": "grep -rn \"def main\" src/cli.py",
+          "expect": { "exitCode": 0, "stdoutMatches": "def main" }
+        }
+      ],
+      "comments": "Buendelt bestehende Module hinter einem Entrypoint, ohne deren Logik zu aendern.",
+      "model": "sonnet",
+      "kind": "command"
+    },
+    {
+      "id": "package-project",
+      "title": "Projekt paketieren",
+      "goal": "pyproject.toml anlegen mit Konsolen-Entrypoint, der auf src/cli.py:main zeigt.",
+      "inputs": ["src/cli.py"],
+      "constraints": ["Keine neuen Runtime-Dependencies ausser dem Build-Backend"],
+      "acceptance": [
+        {
+          "description": "pyproject.toml ist gueltiges TOML",
+          "command": "python -c \"import tomllib; tomllib.load(open('pyproject.toml','rb'))\"",
+          "expect": { "exitCode": 0 }
+        }
+      ],
+      "comments": "Setzt unify-cli voraus -- der Entrypoint muss vorher existieren.",
+      "model": "sonnet",
+      "kind": "command"
+    },
+    {
+      "id": "runner-waves",
+      "title": "Parallel-Wellen im Runner",
+      "goal": "topological_order um eine Funktion topological_waves erweitern, die statt einer flachen Liste Wellen voneinander unabhaengiger Knoten liefert.",
+      "inputs": ["src/runner.py", "tests/test_runner.py"],
+      "constraints": ["Bestehende topological_order-Signatur nicht brechen", "Nur src/ und tests/ anfassen"],
+      "acceptance": [
+        {
+          "description": "topological_waves ist definiert",
+          "command": "grep -rn \"def topological_waves\" src/runner.py",
+          "expect": { "exitCode": 0, "stdoutMatches": "topological_waves" }
+        },
+        {
+          "description": "Alle Tests gruen",
+          "command": "pytest -q",
+          "expect": { "exitCode": 0 }
+        }
+      ],
+      "comments": "Basis fuer parallele Ausfuehrung im Orchestrator.",
+      "model": "sonnet",
+      "kind": "command"
+    },
+    {
+      "id": "orchestrator-resume",
+      "title": "Checkpoint/Resume im Orchestrator",
+      "goal": "Orchestrator-Laeufe als Checkpoint persistieren, sodass ein abgebrochener Lauf fortgesetzt statt von vorn gestartet werden kann.",
+      "inputs": ["src/orchestrator.py", "tests/test_orchestrator.py"],
+      "constraints": ["Checkpoint-Datei nur innerhalb des Repos schreiben", "Nur src/ und tests/ anfassen"],
+      "acceptance": [
+        {
+          "description": "Resume-Logik vorhanden",
+          "command": "grep -rn \"resume\" src/orchestrator.py",
+          "expect": { "exitCode": 0, "stdoutMatches": "resume" }
+        },
+        {
+          "description": "Alle Tests gruen",
+          "command": "pytest -q",
+          "expect": { "exitCode": 0 }
+        }
+      ],
+      "comments": "Baut auf runner-waves auf, damit Resume pro Welle statt pro Einzelknoten greift.",
+      "model": "sonnet",
+      "kind": "command"
+    },
+    {
+      "id": "docs-concept",
+      "title": "Konzept-Doku schreiben",
+      "goal": "docs/concept.md schreiben: Gesamtkonzept des Tools, auf das README.md bereits verweist.",
+      "inputs": ["README.md", "CLAUDE.md"],
+      "constraints": ["Markdown, konsistent mit bestehendem README-Stil"],
+      "acceptance": [
+        {
+          "description": "Datei existiert",
+          "command": "test -f docs/concept.md",
+          "expect": { "exitCode": 0 }
+        },
+        {
+          "description": "Datei behandelt das Konzept inhaltlich",
+          "command": "grep -ic concept docs/concept.md",
+          "expect": { "exitCode": 0, "stdoutNotMatches": "^0$" }
+        }
+      ],
+      "comments": "Textlastig und billig -- bewusst als 'local' geroutet.",
+      "model": "local",
+      "kind": "agent"
+    }
+  ],
+  "edges": [
+    { "from": "unify-cli", "to": "package-project", "label": "Entrypoint muss stehen" },
+    { "from": "runner-waves", "to": "orchestrator-resume", "label": "Wellen vor Resume-Logik" },
+    { "from": "unify-cli", "to": "docs-concept", "label": "CLI-Konzept dokumentieren" }
+  ]
+}
