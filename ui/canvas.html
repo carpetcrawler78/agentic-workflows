@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>agentic-workflows — Canvas</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #d7dbe2;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --accent: #2f6feb;
+    --accent-soft: #e8f0fe;
+    --ok: #1a7f37;
+    --err: #c0392b;
+    --card-w: 200px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Arial, sans-serif; color: var(--text); background: var(--bg); }
+  body { display: flex; flex-direction: column; height: 100vh; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  header button, header label.btn {
+    font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); cursor: pointer; color: var(--text);
+  }
+  header button:hover, header label.btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+  header button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  header button.primary:hover { background: #2558c4; }
+  #workflowMeta { font-size: 12px; color: var(--muted); }
+
+  #dropOverlay {
+    position: fixed; inset: 0; background: rgba(47,111,235,0.12); border: 4px dashed var(--accent);
+    display: none; align-items: center; justify-content: center; z-index: 50; font-size: 22px; color: var(--accent);
+    pointer-events: none;
+  }
+  #dropOverlay.active { display: flex; }
+
+  main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+  #canvasWrap { flex: 1; overflow: auto; position: relative; background:
+    linear-gradient(0deg, transparent 24px, rgba(0,0,0,0.03) 25px),
+    linear-gradient(90deg, transparent 24px, rgba(0,0,0,0.03) 25px);
+    background-size: 25px 25px;
+  }
+  #canvasEmpty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--muted); gap: 10px; text-align: center; padding: 24px;
+  }
+  #canvasEmpty textarea {
+    width: min(520px, 80vw); height: 140px; font-family: monospace; font-size: 12px; padding: 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  #dagSvg { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #nodesLayer { position: absolute; top: 0; left: 0; }
+
+  .node-card {
+    position: absolute; width: var(--card-w); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .node-card:hover { border-color: var(--accent); }
+  .node-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .node-card .nid { font-family: monospace; font-size: 11px; color: var(--muted); }
+  .node-card .ntitle { font-size: 13px; font-weight: 600; margin: 2px 0 6px; word-break: break-word; }
+  .node-card .nmeta { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+  .pill { padding: 1px 6px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+  .pill.kind-agent { background: #fdf0e6; color: #b5651d; }
+  .pill.model-planner { background: #f3e6fb; color: #7b2fb5; }
+  .pill.model-local { background: #e8f7ec; color: #1a7f37; }
+
+  #inspector {
+    width: 360px; min-width: 320px; background: var(--panel); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 14px; flex-shrink: 0;
+  }
+  #inspector h2 { font-size: 14px; margin: 0 0 10px; }
+  #inspector .empty-hint { color: var(--muted); font-size: 13px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .field input[type=text], .field textarea, .field select {
+    width: 100%; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit;
+  }
+  .field textarea { resize: vertical; min-height: 50px; font-family: inherit; }
+  .field .mono { font-family: monospace; }
+  .list-row { display: flex; gap: 4px; margin-bottom: 4px; }
+  .list-row input { flex: 1; }
+  .list-row button, .add-row button { font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); cursor: pointer; }
+  .list-row button:hover, .add-row button:hover { background: #fdeaea; border-color: var(--err); color: var(--err); }
+  .add-row button:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .check-block { border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 8px; background: #fafbfc; }
+  .check-block .crow { display: flex; gap: 4px; margin-bottom: 4px; align-items: center; }
+  .check-block .crow label { width: 90px; font-size: 11px; color: var(--muted); flex-shrink: 0; text-transform: none; }
+  .check-block .crow input { flex: 1; font-size: 12px; padding: 4px 6px; }
+  .check-block .chead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .check-block .chead span { font-size: 11px; font-weight: 700; color: var(--muted); }
+
+  #validatePanel {
+    border-top: 1px solid var(--border); padding: 10px 16px; max-height: 180px; overflow-y: auto; background: var(--panel);
+    font-size: 12px; display: none;
+  }
+  #validatePanel.show { display: block; }
+  #validatePanel.ok { color: var(--ok); }
+  #validatePanel.bad ul { color: var(--err); margin: 0; padding-left: 20px; }
+  #validatePanel .ok-msg { color: var(--ok); font-weight: 600; }
+
+  #runDialog, #previewDialog {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  #runDialog.show, #previewDialog.show { display: flex; }
+  .dialog-box { background: var(--panel); border-radius: 8px; padding: 18px 20px; width: min(640px, 90vw); max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.25); }
+  .dialog-box h3 { margin-top: 0; }
+  .dialog-box pre { background: #1f2430; color: #e8eaf0; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  .dialog-box .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>agentic-workflows — Canvas</h1>
+  <label class="btn">
+    Datei laden
+    <input type="file" id="filePicker" accept="application/json,.json" style="display:none">
+  </label>
+  <button id="btnValidate">Validieren</button>
+  <button id="btnPreview">Knoten-Vorschau</button>
+  <button id="btnExportJson">workflow.json exportieren</button>
+  <button id="btnExportMd">WORKFLOW.md exportieren</button>
+  <button id="btnRun" class="primary">Run-Befehl anzeigen</button>
+  <div class="spacer"></div>
+  <span id="workflowMeta"></span>
+</header>
+
+<main id="dropZone">
+  <div id="canvasWrap">
+    <div id="canvasEmpty">
+      <div>Kein Workflow geladen.</div>
+      <div>Datei per Picker oder Drag&amp;Drop hier ablegen, oder JSON unten einfuegen:</div>
+      <textarea id="pasteArea" placeholder="{ &quot;version&quot;: &quot;1&quot;, ... }"></textarea>
+      <button id="btnLoadPaste">Aus Textarea laden</button>
+    </div>
+    <svg id="dagSvg"></svg>
+    <div id="nodesLayer"></div>
+  </div>
+  <div id="inspector">
+    <div class="empty-hint">Kein Knoten ausgewaehlt. Knoten in der Canvas anklicken.</div>
+  </div>
+</main>
+
+<div id="validatePanel"></div>
+
+<div id="dropOverlay">workflow.json hier ablegen</div>
+
+<div id="runDialog">
+  <div class="dialog-box">
+    <h3>Run mit Gate</h3>
+    <p>Das UI fuehrt nichts selbst aus. Dieser Befehl laeuft lokal gegen die Engine
+       (Python + bash/Coreutils im PATH muessen vorhanden sein):</p>
+    <pre id="runCommandText"></pre>
+    <div class="dialog-actions">
+      <button id="btnCopyRunCmd">In Zwischenablage kopieren</button>
+      <button id="btnCloseRunDialog">Schliessen</button>
+    </div>
+  </div>
+</div>
+
+<div id="previewDialog">
+  <div class="dialog-box">
+    <h3>Knoten-Vorschau (gerendertes Markdown)</h3>
+    <div class="field">
+      <label>Knoten</label>
+      <select id="previewSelect"></select>
+    </div>
+    <pre id="previewText"></pre>
+    <div class="dialog-actions">
+      <button id="btnClosePreviewDialog">Schliessen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------------
+ * State
+ * ------------------------------------------------------------------- */
+var workflow = null;       // In-Memory Workflow-Objekt (entspricht schema/workflow.schema.json)
+var selectedNodeId = null; // aktuell im Inspector angezeigter Knoten
+
+var MODEL_DEFAULT = "sonnet";
+var KIND_DEFAULT = "command";
+var MODEL_VALUES = ["planner", "sonnet", "local"];
+var KIND_VALUES = ["command", "agent"];
+
+/* ---------------------------------------------------------------------
+ * Loading
+ * ------------------------------------------------------------------- */
+
+function loadWorkflow(obj) {
+  workflow = obj;
+  if (!Array.isArray(workflow.nodes)) workflow.nodes = [];
+  if (!Array.isArray(workflow.edges)) workflow.edges = [];
+  if (!workflow.defaults) workflow.defaults = {};
+  selectedNodeId = null;
+  document.getElementById("canvasEmpty").style.display = "none";
+  renderCanvas();
+  renderInspector();
+  updateWorkflowMeta();
+  hideValidatePanel();
+}
+
+function loadWorkflowFromText(text) {
+  var obj;
+  try {
+    obj = JSON.parse(text);
+  } catch (e) {
+    alert("JSON konnte nicht geparst werden: " + e.message);
+    return;
+  }
+  loadWorkflow(obj);
+}
+
+function loadWorkflowFromFile(file) {
+  var reader = new FileReader();
+  reader.onload = function () {
+    loadWorkflowFromText(String(reader.result));
+  };
+  reader.onerror = function () {
+    alert("Datei konnte nicht gelesen werden.");
+  };
+  reader.readAsText(file);
+}
+
+function updateWorkflowMeta() {
+  var el = document.getElementById("workflowMeta");
+  if (!workflow) { el.textContent = ""; return; }
+  el.textContent = (workflow.name || "(ohne Namen)") + " - " + workflow.nodes.length + " Knoten, " + workflow.edges.length + " Kanten";
+}
+
+/* ---------------------------------------------------------------------
+ * Topo-Sortierung / Wellen (analog src/runner.py topological_waves)
+ * ------------------------------------------------------------------- */
+
+function topologicalWaves(wf) {
+  var nodes = wf.nodes;
+  var edges = wf.edges || [];
+  var nodeIds = nodes.map(function (n) { return n.id; });
+  var position = {};
+  nodeIds.forEach(function (id, idx) { position[id] = idx; });
+
+  var indegree = {};
+  var adjacency = {};
+  nodeIds.forEach(function (id) { indegree[id] = 0; adjacency[id] = []; });
+
+  edges.forEach(function (e) {
+    if (adjacency.hasOwnProperty(e.from) && indegree.hasOwnProperty(e.to)) {
+      adjacency[e.from].push(e.to);
+      indegree[e.to] += 1;
+    }
+  });
+
+  var waves = [];
+  var processed = 0;
+  var ready = nodeIds.filter(function (id) { return indegree[id] === 0; });
+  ready.sort(function (a, b) { return position[a] - position[b]; });
+
+  while (ready.length) {
+    waves.push(ready);
+    processed += ready.length;
+    var nextReady = [];
+    ready.forEach(function (id) {
+      adjacency[id].forEach(function (neighbor) {
+        indegree[neighbor] -= 1;
+        if (indegree[neighbor] === 0) nextReady.push(neighbor);
+      });
+    });
+    ready = nextReady.sort(function (a, b) { return position[a] - position[b]; });
+  }
+
+  var cycleNodes = null;
+  if (processed !== nodeIds.length) {
+    cycleNodes = nodeIds.filter(function (id) { return indegree[id] > 0; });
+  }
+  return { waves: waves, cycleNodes: cycleNodes };
+}
+
+/* ---------------------------------------------------------------------
+ * Layout + Canvas-Rendering
+ * ------------------------------------------------------------------- */
+
+var CARD_W = 200;
+var CARD_H = 90;
+var COL_GAP = 60;
+var ROW_GAP = 40;
+var MARGIN = 30;
+
+function layoutDag(wf) {
+  var result = topologicalWaves(wf);
+  var positions = {};
+  var waves = result.waves;
+
+  // Knoten, die wegen eines Zyklus in keiner Welle landen, trotzdem anzeigen
+  // (eigene Extra-Welle ans Ende), damit die Canvas nie leer bleibt.
+  var placed = {};
+  waves.forEach(function (wave) { wave.forEach(function (id) { placed[id] = true; }); });
+  var leftover = wf.nodes.map(function (n) { return n.id; }).filter(function (id) { return !placed[id]; });
+  if (leftover.length) waves = waves.concat([leftover]);
+
+  waves.forEach(function (wave, colIdx) {
+    wave.forEach(function (id, rowIdx) {
+      positions[id] = {
+        x: MARGIN + colIdx * (CARD_W + COL_GAP),
+        y: MARGIN + rowIdx * (CARD_H + ROW_GAP)
+      };
+    });
+  });
+
+  var width = MARGIN * 2 + waves.length * CARD_W + Math.max(0, waves.length - 1) * COL_GAP;
+  var maxRows = waves.reduce(function (m, w) { return Math.max(m, w.length); }, 0);
+  var height = MARGIN * 2 + maxRows * CARD_H + Math.max(0, maxRows - 1) * ROW_GAP;
+
+  return { positions: positions, width: Math.max(width, 400), height: Math.max(height, 300), cycleNodes: result.cycleNodes };
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+  });
+}
+
+function resolveValue(node, key, schemaDefault) {
+  var defaults = (workflow && workflow.defaults) || {};
+  if (node[key] != null) return node[key];
+  if (defaults[key] != null) return defaults[key];
+  return schemaDefault;
+}
+
+function renderCanvas() {
+  var nodesLayer = document.getElementById("nodesLayer");
+  var svg = document.getElementById("dagSvg");
+  nodesLayer.innerHTML = "";
+  svg.innerHTML = "";
+
+  if (!workflow || !workflow.nodes.length) {
+    document.getElementById("canvasEmpty").style.display = "flex";
+    svg.setAttribute("width", 0);
+    svg.setAttribute("height", 0);
+    return;
+  }
+  document.getElementById("canvasEmpty").style.display = "none";
+
+  var layout = layoutDag(workflow);
+  svg.setAttribute("width", layout.width);
+  svg.setAttribute("height", layout.height);
+  nodesLayer.style.width = layout.width + "px";
+  nodesLayer.style.height = layout.height + "px";
+
+  // Arrow-Marker einmal definieren
+  var defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  defs.innerHTML =
+    '<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">' +
+    '<path d="M0,0 L8,3 L0,6 Z" fill="#6b7280"></path></marker>';
+  svg.appendChild(defs);
+
+  var cycleSet = {};
+  if (layout.cycleNodes) layout.cycleNodes.forEach(function (id) { cycleSet[id] = true; });
+
+  // Kanten zuerst (liegen unter den Karten)
+  (workflow.edges || []).forEach(function (edge) {
+    var from = layout.positions[edge.from];
+    var to = layout.positions[edge.to];
+    if (!from || !to) return; // verweist auf unbekannte ID -> Validierung zeigt das, hier nur nicht zeichnen
+
+    var x1 = from.x + CARD_W;
+    var y1 = from.y + CARD_H / 2;
+    var x2 = to.x;
+    var y2 = to.y + CARD_H / 2;
+
+    var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2);
+    line.setAttribute("y2", y2);
+    line.setAttribute("stroke", "#6b7280");
+    line.setAttribute("stroke-width", "1.5");
+    line.setAttribute("marker-end", "url(#arrowhead)");
+    svg.appendChild(line);
+
+    if (edge.label) {
+      var text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", (x1 + x2) / 2);
+      text.setAttribute("y", (y1 + y2) / 2 - 6);
+      text.setAttribute("font-size", "11");
+      text.setAttribute("fill", "#6b7280");
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = edge.label;
+      svg.appendChild(text);
+    }
+  });
+
+  workflow.nodes.forEach(function (node) {
+    var pos = layout.positions[node.id];
+    if (!pos) return;
+
+    var kind = resolveValue(node, "kind", KIND_DEFAULT);
+    var model = resolveValue(node, "model", MODEL_DEFAULT);
+    var acceptanceCount = Array.isArray(node.acceptance) ? node.acceptance.length : 0;
+
+    var card = document.createElement("div");
+    card.className = "node-card" + (node.id === selectedNodeId ? " selected" : "") + (cycleSet[node.id] ? "" : "");
+    card.style.left = pos.x + "px";
+    card.style.top = pos.y + "px";
+    card.dataset.nodeId = node.id;
+
+    var kindIcon = kind === "agent" ? "&#129302;" : "&#9654;"; // robot / play
+    card.innerHTML =
+      '<div class="nid">' + escapeHtml(node.id) + (cycleSet[node.id] ? ' <span style="color:#c0392b">(Zyklus)</span>' : '') + '</div>' +
+      '<div class="ntitle">' + kindIcon + ' ' + escapeHtml(node.title || node.id) + '</div>' +
+      '<div class="nmeta">' +
+      '<span class="pill kind-' + kind + '">' + kind + '</span>' +
+      '<span class="pill model-' + model + '">' + model + '</span>' +
+      '<span>' + acceptanceCount + ' Check' + (acceptanceCount === 1 ? '' : 's') + '</span>' +
+      '</div>';
+
+    card.addEventListener("click", function () { selectNode(node.id); });
+    nodesLayer.appendChild(card);
+  });
+}
+
+/* ---------------------------------------------------------------------
+ * Selection + Inspector
+ * ------------------------------------------------------------------- */
+
+function findNode(id) {
+  return workflow.nodes.find(function (n) { return n.id === id; });
+}
+
+function selectNode(id) {
+  selectedNodeId = id;
+  renderCanvas();
+  renderInspector();
+}
+
+function renderInspector() {
+  var panel = document.getElementById("inspector");
+  if (!workflow || selectedNodeId == null) {
+    panel.innerHTML = '<div class="empty-hint">Kein Knoten ausgewaehlt. Knoten in der Canvas anklicken.</div>';
+    return;
+  }
+  var node = findNode(selectedNodeId);
+  if (!node) {
+    panel.innerHTML = '<div class="empty-hint">Knoten nicht gefunden.</div>';
+    return;
+  }
+
+  if (!Array.isArray(node.inputs)) node.inputs = [];
+  if (!Array.isArray(node.constraints)) node.constraints = [];
+  if (!Array.isArray(node.acceptance)) node.acceptance = [];
+
+  var html = '<h2>Knoten: <span class="mono">' + escapeHtml(node.id) + '</span></h2>';
+
+  html += fieldText("title", "Title", node.title || "");
+  html += fieldTextarea("goal", "Goal", node.goal || "");
+  html += fieldSelect("kind", "Kind", KIND_VALUES, node.kind || "");
+  html += fieldSelect("model", "Model", MODEL_VALUES, node.model || "");
+
+  html += listField("inputs", "Inputs", node.inputs);
+  html += listField("constraints", "Constraints", node.constraints);
+  html += acceptanceField(node.acceptance);
+
+  html += fieldTextarea("comments", "Comments", node.comments || "");
+
+  panel.innerHTML = html;
+  wireInspectorEvents(node);
+}
+
+function fieldText(key, label, value) {
+  return '<div class="field"><label>' + label + '</label>' +
+    '<input type="text" data-field="' + key + '" value="' + escapeHtml(value) + '"></div>';
+}
+
+function fieldTextarea(key, label, value) {
+  return '<div class="field"><label>' + label + '</label>' +
+    '<textarea data-field="' + key + '">' + escapeHtml(value) + '</textarea></div>';
+}
+
+function fieldSelect(key, label, options, current) {
+  var optHtml = '<option value="">(Default)</option>';
+  options.forEach(function (opt) {
+    optHtml += '<option value="' + opt + '"' + (opt === current ? " selected" : "") + '>' + opt + '</option>';
+  });
+  return '<div class="field"><label>' + label + '</label>' +
+    '<select data-field="' + key + '">' + optHtml + '</select></div>';
+}
+
+function listField(key, label, items) {
+  var rows = items.map(function (val, idx) {
+    return '<div class="list-row">' +
+      '<input type="text" data-list="' + key + '" data-idx="' + idx + '" value="' + escapeHtml(val) + '">' +
+      '<button data-list-remove="' + key + '" data-idx="' + idx + '" title="Entfernen">&times;</button>' +
+      '</div>';
+  }).join("");
+  return '<div class="field"><label>' + label + '</label>' + rows +
+    '<div class="add-row"><button data-list-add="' + key + '">+ ' + label + '</button></div></div>';
+}
+
+function acceptanceField(checks) {
+  var blocks = checks.map(function (check, idx) {
+    var expect = check.expect || {};
+    return '<div class="check-block" data-check-idx="' + idx + '">' +
+      '<div class="chead"><span>Check ' + (idx + 1) + '</span>' +
+      '<button data-check-remove="' + idx + '">Entfernen</button></div>' +
+      checkRow("description", "Description", expect.__placeholder, check.description || "", idx) +
+      checkRow("command", "Command", null, check.command || "", idx) +
+      checkRow("expect.exitCode", "exitCode", null, expect.exitCode == null ? "" : expect.exitCode, idx) +
+      checkRow("expect.stdoutMatches", "stdoutMatches", null, expect.stdoutMatches || "", idx) +
+      checkRow("expect.stdoutNotMatches", "stdoutNotMatches", null, expect.stdoutNotMatches || "", idx) +
+      checkRow("expect.stderrMatches", "stderrMatches", null, expect.stderrMatches || "", idx) +
+      '</div>';
+  }).join("");
+  return '<div class="field"><label>Acceptance</label>' + blocks +
+    '<div class="add-row"><button data-check-add="1">+ Check</button></div></div>';
+}
+
+function checkRow(field, label, _unused, value, idx) {
+  return '<div class="crow"><label>' + label + '</label>' +
+    '<input type="text" data-check-field="' + field + '" data-check-idx="' + idx + '" value="' + escapeHtml(value) + '"></div>';
+}
+
+function wireInspectorEvents(node) {
+  var panel = document.getElementById("inspector");
+
+  panel.querySelectorAll("[data-field]").forEach(function (el) {
+    el.addEventListener("input", function () {
+      var key = el.dataset.field;
+      var value = el.value;
+      if (value === "" && (key === "kind" || key === "model")) {
+        delete node[key];
+      } else {
+        node[key] = value;
+      }
+      renderCanvas();
+      updateWorkflowMeta();
+    });
+  });
+
+  panel.querySelectorAll("[data-list]").forEach(function (el) {
+    el.addEventListener("input", function () {
+      var key = el.dataset.list;
+      var idx = parseInt(el.dataset.idx, 10);
+      node[key][idx] = el.value;
+    });
+  });
+
+  panel.querySelectorAll("[data-list-add]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var key = el.dataset.listAdd;
+      node[key].push("");
+      renderInspector();
+    });
+  });
+
+  panel.querySelectorAll("[data-list-remove]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var key = el.dataset.listRemove;
+      var idx = parseInt(el.dataset.idx, 10);
+      node[key].splice(idx, 1);
+      renderInspector();
+    });
+  });
+
+  panel.querySelectorAll("[data-check-field]").forEach(function (el) {
+    el.addEventListener("input", function () {
+      var field = el.dataset.checkField;
+      var idx = parseInt(el.dataset.checkIdx, 10);
+      var check = node.acceptance[idx];
+      if (!check.expect) check.expect = {};
+      if (field.indexOf("expect.") === 0) {
+        var sub = field.slice(7);
+        var val = el.value;
+        if (val === "") {
+          delete check.expect[sub];
+        } else if (sub === "exitCode") {
+          check.expect[sub] = parseInt(val, 10);
+        } else {
+          check.expect[sub] = val;
+        }
+      } else {
+        check[field] = el.value;
+      }
+      renderCanvas();
+    });
+  });
+
+  panel.querySelectorAll("[data-check-remove]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var idx = parseInt(el.dataset.checkRemove, 10);
+      node.acceptance.splice(idx, 1);
+      renderInspector();
+      renderCanvas();
+    });
+  });
+
+  panel.querySelectorAll("[data-check-add]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      node.acceptance.push({ description: "", command: "", expect: { exitCode: 0 } });
+      renderInspector();
+      renderCanvas();
+    });
+  });
+}
+
+/* ---------------------------------------------------------------------
+ * Validierung (Komfort-Spiegel -- src/loader.py bleibt die Source of Truth)
+ * ------------------------------------------------------------------- */
+
+var NODE_ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+function validateWorkflow(wf) {
+  var issues = [];
+
+  if (wf.version !== "1") issues.push("version muss \"1\" sein.");
+  if (!wf.name || typeof wf.name !== "string" || wf.name.length < 1) issues.push("name fehlt oder ist leer.");
+  if (!Array.isArray(wf.nodes) || wf.nodes.length < 1) {
+    issues.push("nodes fehlt oder ist leer (mindestens 1 Knoten erforderlich).");
+    return issues;
+  }
+
+  var seenIds = {};
+  wf.nodes.forEach(function (node, idx) {
+    var prefix = "Knoten #" + (idx + 1) + " (" + (node.id || "?") + "): ";
+
+    if (!node.id) {
+      issues.push(prefix + "id fehlt.");
+    } else {
+      if (!NODE_ID_RE.test(node.id)) issues.push(prefix + "id ist nicht kebab-case (" + node.id + ").");
+      if (seenIds[node.id]) issues.push(prefix + "id ist nicht eindeutig (" + node.id + ").");
+      seenIds[node.id] = true;
+    }
+
+    if (!node.goal || typeof node.goal !== "string" || node.goal.length < 1) {
+      issues.push(prefix + "goal fehlt oder ist leer.");
+    }
+
+    if (!Array.isArray(node.acceptance) || node.acceptance.length < 1) {
+      issues.push(prefix + "acceptance fehlt oder ist leer (mindestens 1 Check erforderlich).");
+    } else {
+      node.acceptance.forEach(function (check, cidx) {
+        var cprefix = prefix + "Check " + (cidx + 1) + ": ";
+        if (!check.command || typeof check.command !== "string" || check.command.length < 1) {
+          issues.push(cprefix + "command fehlt oder ist leer.");
+        }
+        if (!check.expect || typeof check.expect !== "object" || Object.keys(check.expect).length < 1) {
+          issues.push(cprefix + "expect fehlt oder hat keine Bedingung.");
+        }
+      });
+    }
+
+    if (node.model != null && MODEL_VALUES.indexOf(node.model) === -1) {
+      issues.push(prefix + "model ist nicht aus dem Enum (" + node.model + ").");
+    }
+    if (node.kind != null && KIND_VALUES.indexOf(node.kind) === -1) {
+      issues.push(prefix + "kind ist nicht aus dem Enum (" + node.kind + ").");
+    }
+  });
+
+  var nodeIdSet = {};
+  wf.nodes.forEach(function (n) { if (n.id) nodeIdSet[n.id] = true; });
+
+  (wf.edges || []).forEach(function (edge, idx) {
+    var prefix = "Kante #" + (idx + 1) + ": ";
+    if (!edge.from || !nodeIdSet[edge.from]) issues.push(prefix + "from verweist auf unbekannte Knoten-ID (" + edge.from + ").");
+    if (!edge.to || !nodeIdSet[edge.to]) issues.push(prefix + "to verweist auf unbekannte Knoten-ID (" + edge.to + ").");
+  });
+
+  var cycleResult = topologicalWaves(wf);
+  if (cycleResult.cycleNodes && cycleResult.cycleNodes.length) {
+    issues.push("Zyklus im Graph, beteiligte Knoten: " + cycleResult.cycleNodes.join(", "));
+  }
+
+  return issues;
+}
+
+function showValidatePanel(issues) {
+  var panel = document.getElementById("validatePanel");
+  panel.classList.add("show");
+  if (issues.length === 0) {
+    panel.classList.remove("bad");
+    panel.classList.add("ok");
+    panel.innerHTML = '<span class="ok-msg">OK -- keine Probleme gefunden (' + (workflow.nodes.length) + ' Knoten geprueft).</span>';
+  } else {
+    panel.classList.remove("ok");
+    panel.classList.add("bad");
+    panel.innerHTML = "<strong>" + issues.length + " Problem(e) gefunden:</strong><ul>" +
+      issues.map(function (i) { return "<li>" + escapeHtml(i) + "</li>"; }).join("") + "</ul>";
+  }
+}
+
+function hideValidatePanel() {
+  var panel = document.getElementById("validatePanel");
+  panel.classList.remove("show", "ok", "bad");
+  panel.innerHTML = "";
+}
+
+/* ---------------------------------------------------------------------
+ * Render-Logik fuer Export (spiegelt src/export.py render_node / _render_mermaid)
+ * ------------------------------------------------------------------- */
+
+function bulletList(items) {
+  return items.map(function (item) { return "- " + item; }).join("\n");
+}
+
+function acceptanceLines(acceptance) {
+  return acceptance.map(function (check) {
+    var commandSpan = "`" + check.command + "`";
+    if (check.description) {
+      return "- " + check.description + ": " + commandSpan;
+    }
+    return "- " + commandSpan;
+  }).join("\n");
+}
+
+function renderNode(node, defaults) {
+  defaults = defaults || {};
+  var kind = resolveValue(node, "kind", KIND_DEFAULT);
+  var model = resolveValue(node, "model", MODEL_DEFAULT);
+  var title = node.title || node.id;
+  var description = node.title || node.id;
+
+  var frontmatterLines = ["---", "description: " + description, "model: " + model];
+  if (kind === "agent") frontmatterLines.push("name: " + node.id);
+  frontmatterLines.push("---");
+
+  var bodySections = ["# " + title, "## Ziel", node.goal || ""];
+
+  if (node.inputs && node.inputs.length) {
+    bodySections.push("## Inputs");
+    bodySections.push(bulletList(node.inputs));
+  }
+
+  if (node.constraints && node.constraints.length) {
+    bodySections.push("## Constraints");
+    bodySections.push(bulletList(node.constraints));
+  }
+
+  bodySections.push("## Acceptance");
+  bodySections.push(acceptanceLines(node.acceptance || []));
+
+  if (node.comments) {
+    bodySections.push("## Hinweise");
+    bodySections.push(node.comments);
+  }
+
+  return frontmatterLines.join("\n") + "\n\n" + bodySections.join("\n\n") + "\n";
+}
+
+function mermaidLabel(node) {
+  return node.title || node.id;
+}
+
+function renderMermaid(wf) {
+  var lines = ["```mermaid", "graph TD"];
+  wf.nodes.forEach(function (node) {
+    lines.push('    ' + node.id + '["' + mermaidLabel(node) + '"]');
+  });
+  (wf.edges || []).forEach(function (edge) {
+    if (edge.label) {
+      lines.push('    ' + edge.from + ' -->|' + edge.label + '| ' + edge.to);
+    } else {
+      lines.push('    ' + edge.from + ' --> ' + edge.to);
+    }
+  });
+  lines.push("```");
+  return lines.join("\n");
+}
+
+function renderWorkflowMd(wf, defaults) {
+  if (defaults == null) defaults = wf.defaults || {};
+
+  var sections = ["# " + wf.name];
+  if (wf.description) sections.push(wf.description);
+  sections.push(renderMermaid(wf));
+  sections.push("## Knoten");
+  sections.push(wf.nodes.map(function (node) { return renderNode(node, defaults); }).join("\n\n"));
+
+  return sections.join("\n\n") + "\n";
+}
+
+/* ---------------------------------------------------------------------
+ * Export (download im Browser)
+ * ------------------------------------------------------------------- */
+
+function downloadText(filename, text) {
+  var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportJson() {
+  if (!workflow) { alert("Kein Workflow geladen."); return; }
+  downloadText("workflow.json", JSON.stringify(workflow, null, 2));
+}
+
+function exportWorkflowMd() {
+  if (!workflow) { alert("Kein Workflow geladen."); return; }
+  downloadText("WORKFLOW.md", renderWorkflowMd(workflow));
+}
+
+/* ---------------------------------------------------------------------
+ * Run-Dialog (kein Browser-Execute, nur Befehl anzeigen)
+ * ------------------------------------------------------------------- */
+
+function showRunDialog() {
+  var path = workflow ? "workflow.json" : "<workflow.json>";
+  var cmd = "python -m src.cli run " + path + " --no-stop";
+  document.getElementById("runCommandText").textContent = cmd;
+  document.getElementById("runDialog").classList.add("show");
+}
+
+/* ---------------------------------------------------------------------
+ * Vorschau-Dialog
+ * ------------------------------------------------------------------- */
+
+function showPreviewDialog() {
+  if (!workflow || !workflow.nodes.length) { alert("Kein Workflow geladen."); return; }
+  var select = document.getElementById("previewSelect");
+  select.innerHTML = workflow.nodes.map(function (n) {
+    return '<option value="' + escapeHtml(n.id) + '">' + escapeHtml(n.id) + '</option>';
+  }).join("");
+  renderPreviewFor(workflow.nodes[0].id);
+  document.getElementById("previewDialog").classList.add("show");
+}
+
+function renderPreviewFor(nodeId) {
+  var node = findNode(nodeId);
+  if (!node) return;
+  document.getElementById("previewText").textContent = renderNode(node, workflow.defaults || {});
+}
+
+/* ---------------------------------------------------------------------
+ * Event-Wiring
+ * ------------------------------------------------------------------- */
+
+document.getElementById("filePicker").addEventListener("change", function (e) {
+  if (e.target.files && e.target.files[0]) loadWorkflowFromFile(e.target.files[0]);
+});
+
+document.getElementById("btnLoadPaste").addEventListener("click", function () {
+  var text = document.getElementById("pasteArea").value;
+  if (!text.trim()) { alert("Textarea ist leer."); return; }
+  loadWorkflowFromText(text);
+});
+
+document.getElementById("btnValidate").addEventListener("click", function () {
+  if (!workflow) { alert("Kein Workflow geladen."); return; }
+  showValidatePanel(validateWorkflow(workflow));
+});
+
+document.getElementById("btnExportJson").addEventListener("click", exportJson);
+document.getElementById("btnExportMd").addEventListener("click", exportWorkflowMd);
+document.getElementById("btnRun").addEventListener("click", showRunDialog);
+document.getElementById("btnPreview").addEventListener("click", showPreviewDialog);
+
+document.getElementById("btnCloseRunDialog").addEventListener("click", function () {
+  document.getElementById("runDialog").classList.remove("show");
+});
+document.getElementById("btnCopyRunCmd").addEventListener("click", function () {
+  var text = document.getElementById("runCommandText").textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text);
+  }
+});
+
+document.getElementById("btnClosePreviewDialog").addEventListener("click", function () {
+  document.getElementById("previewDialog").classList.remove("show");
+});
+document.getElementById("previewSelect").addEventListener("change", function (e) {
+  renderPreviewFor(e.target.value);
+});
+
+/* Drag & Drop ueber das gesamte main-Element */
+var dropZone = document.getElementById("dropZone");
+var dropOverlay = document.getElementById("dropOverlay");
+var dragCounter = 0;
+
+dropZone.addEventListener("dragenter", function (e) {
+  e.preventDefault();
+  dragCounter++;
+  dropOverlay.classList.add("active");
+});
+dropZone.addEventListener("dragover", function (e) {
+  e.preventDefault();
+});
+dropZone.addEventListener("dragleave", function (e) {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dropOverlay.classList.remove("active");
+  }
+});
+dropZone.addEventListener("drop", function (e) {
+  e.preventDefault();
+  dragCounter = 0;
+  dropOverlay.classList.remove("active");
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    loadWorkflowFromFile(e.dataTransfer.files[0]);
+  }
+});
+
+</script>
+</body>
+</html>

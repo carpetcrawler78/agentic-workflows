@@ -59,14 +59,21 @@ Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` geb
 10. **package-project / runner-waves / orchestrator-resume / docs-concept**
     (`CC_PROMPT_meta_remaining.md`) — `pyproject.toml`, `topological_waves`,
     Checkpoint/Resume, `docs/concept.md`.
+11. **ui-canvas** (`CC_PROMPT_ui_canvas.md`) — `ui/canvas.html`, Single-File-Canvas-UI:
+    laden/editieren/validieren/exportieren im Browser. Export byte-identisch gegen `src/export.py`.
 
 ## Aktueller Stand (2026-06-21)
 
 - **Engine komplett**, end-to-end lauffähig. Beispiel-Workflow läuft 3/3 durchs Gate.
-- **46 Tests grün** (loader 8, export 9, runner 7, executor 10, orchestrator 9, +meta 3).
+- **54 Tests grün** (loader 8, export 9, runner 13, executor 10, orchestrator 11, +meta 3).
 - **meta-workflow 5/5** auf Thomas' Maschine (Python 3.11). Der Backlog der eigenen Roadmap
   ist damit abgearbeitet — das Tool hat seine eigenen nächsten Stufen selbst gebaut.
-- UI: noch nicht gebaut. CC-Prompt liegt bereit: `CC_PROMPT_ui_canvas.md`.
+- **UI gebaut**: `ui/canvas.html` (Single-File, keine Deps, kein Build-Step). Laden via
+  Datei-Picker/Drag&Drop/Paste; Canvas mit Auto-Layout (JS-Port der Kahn-Wellen aus
+  `runner.py`); Inspector pro Slot editierbar; Browser-Validierung als Komfort-Spiegel
+  (`src/loader.py` bleibt Source of Truth); Export `workflow.json` + `WORKFLOW.md` im Browser,
+  byte-identisch gegen `src/export.py` verifiziert. „Run mit Gate" gibt nur den CLI-Befehl aus.
+  Gebaut über `CC_PROMPT_ui_canvas.md`.
 
 ## Zwei Ausführungsmodi (Stufe 1 vs. Stufe 2 — beide existieren in der Engine)
 
@@ -95,9 +102,10 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 
 ## Nächste Schritte
 
-1. **UI bauen** (`CC_PROMPT_ui_canvas.md`): Single-File-HTML-Canvas, erster endnutzer-zugewandter
-   Teil. Export-only läuft im Browser; "Run mit Gate" gibt den CLI-Befehl aus.
-2. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird.
+1. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird (Windows nutzt
+   sonst cmd.exe; bash-Stil-Checks fallen durch — siehe „Bekannte Probleme" oben).
+2. **UI-Polish** (`ui/canvas.html` steht): Feinschliff, ggf. Live-Mermaid-Preview, Round-Trip-
+   Härtung.
 3. Weitere meta-workflow-Knoten bzw. neue Workflows (z.B. ein nicht-Dev-Workflow als Beweis
    der Allgemeinheit — Idee "Steuer-/Dokumenten-Sammler" wurde diskutiert, noch nicht gebaut).
 
@@ -110,4 +118,5 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 | `docs/concept.md` | Gesamtkonzept (vom `docs-concept`-Knoten erzeugt) |
 | `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Quelle der Build-Historie) |
 | `schema/workflow.schema.json` | Datenmodell (Source of Truth) |
+| `ui/canvas.html` | Single-File-Canvas-UI (laden/editieren/validieren/exportieren im Browser) |
 | `meta-workflow.json` | die eigene Roadmap als ausführbarer Workflow (Dogfooding) |

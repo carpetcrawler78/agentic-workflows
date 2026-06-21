@@ -4,8 +4,10 @@ injizierbares Callable (Dependency Injection), damit der Kern ohne echten
 Claude-Code-Aufruf testbar bleibt."""
 
 import argparse
+import json
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 
 try:
@@ -54,19 +56,53 @@ def _agent_error_result(node_id, exc):
     return NodeResult(node_id=node_id, passed=False, checks=[check_result])
 
 
-def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True):
+def _load_checkpoint(checkpoint_path):
+    """Liest bereits bestandene node-ids aus der Checkpoint-Datei. Fehlt die Datei,
+    gilt das als leerer Fortschritt (frischer Lauf)."""
+    path = Path(checkpoint_path)
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("passed_node_ids", [])
+
+
+def _write_checkpoint(checkpoint_path, passed_node_ids):
+    """Schreibt den bisherigen Fortschritt (bestandene node-ids) als JSON."""
+    path = Path(checkpoint_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump({"passed_node_ids": passed_node_ids}, f)
+
+
+def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False):
     """Validiert den Workflow, bestimmt die Topo-Reihenfolge und fuehrt pro Knoten
     den optionalen Agent-Schritt plus das acceptance-Gate aus. Bei Fehlschlag wird
-    per Default gestoppt, die restlichen Knoten werden als skipped markiert."""
+    per Default gestoppt, die restlichen Knoten werden als skipped markiert.
+
+    Ist checkpoint_path gesetzt, wird nach jedem verarbeiteten Knoten der Fortschritt
+    (bestandene node-ids) dorthin geschrieben. Mit resume=True werden bereits darin
+    vermerkte Knoten uebersprungen (skipped=True, agent_invoked=False, passed=True)
+    und der Lauf setzt beim ersten offenen Knoten fort. Ohne checkpoint_path ist das
+    Verhalten exakt wie zuvor."""
     validate_workflow(workflow)
     order = topological_order(workflow)
     defaults = workflow.get("defaults", {})
     nodes_by_id = {node["id"]: node for node in workflow["nodes"]}
 
+    already_passed = set(_load_checkpoint(checkpoint_path)) if (resume and checkpoint_path is not None) else set()
+    passed_node_ids = list(already_passed)
+
     runs = []
     stopped = False
 
     for node_id in order:
+        if node_id in already_passed:
+            runs.append(
+                NodeRun(node_id=node_id, skipped=True, agent_invoked=False, result=None, passed=True)
+            )
+            continue
+
         if stopped:
             runs.append(
                 NodeRun(node_id=node_id, skipped=True, agent_invoked=False, result=None, passed=False)
@@ -88,23 +124,37 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True):
                 )
                 if stop_on_failure:
                     stopped = True
+                if checkpoint_path is not None:
+                    _write_checkpoint(checkpoint_path, passed_node_ids)
                 continue
 
         result = run_node(node, defaults, cwd_root)
         runs.append(
             NodeRun(node_id=node_id, skipped=False, agent_invoked=agent_invoked, result=result, passed=result.passed)
         )
+        if result.passed:
+            passed_node_ids.append(node_id)
         if not result.passed and stop_on_failure:
             stopped = True
 
-    overall_passed = all(not run.skipped and run.passed for run in runs)
+        if checkpoint_path is not None:
+            _write_checkpoint(checkpoint_path, passed_node_ids)
+
+    overall_passed = all(run.passed for run in runs)
     return WorkflowRun(order=order, runs=runs, passed=overall_passed)
 
 
-def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True):
+def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False):
     """Liest+parst die Workflow-Datei (loader.validate_workflow_file) und ruft run_workflow."""
     workflow = validate_workflow_file(path)
-    return run_workflow(workflow, agent=agent, cwd_root=cwd_root, stop_on_failure=stop_on_failure)
+    return run_workflow(
+        workflow,
+        agent=agent,
+        cwd_root=cwd_root,
+        stop_on_failure=stop_on_failure,
+        checkpoint_path=checkpoint_path,
+        resume=resume,
+    )
 
 
 def make_claude_agent(extra_args=None):

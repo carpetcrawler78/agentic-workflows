@@ -1,6 +1,6 @@
 # agentic-workflows — Projekt-Übersicht (Scope, Warum, Stand)
 
-Stand: 2026-06-21 (Engine komplett; Chronik in `BUILD_LOG.md`)
+Stand: 2026-06-21 (Engine komplett + UI gebaut; Chronik in `BUILD_LOG.md`)
 
 Diese Datei fasst zusammen, **was** das Projekt ist, **warum** es existiert und **was bisher
 erarbeitet** wurde. Sie ist der Einstiegspunkt; Details stehen in den verlinkten Dateien.
@@ -110,7 +110,13 @@ Zwei Kandidaten, Entscheidung steht aus:
   `loader` (validieren) → `export` (Artefakte + `WORKFLOW.md`) → `runner` (Topo + Wellen +
   Zyklus-Check) → `executor` (acceptance-Gate) → `orchestrator` (verdrahtet alles,
   Verify-Only vs. `--execute`, Checkpoint/Resume) → `cli` (gemeinsamer Entrypoint).
-  **46 Tests grün**, Beispiel-Workflow läuft end-to-end durchs Gate.
+  **54 Tests grün**, Beispiel-Workflow läuft end-to-end durchs Gate.
+- **UI gebaut (2026-06-21)** — `ui/canvas.html`, Single-File (Vanilla HTML/CSS/JS, keine Deps,
+  kein Build-Step). Laden via Datei-Picker/Drag&Drop/Paste, Canvas mit Auto-Layout (JS-Port von
+  `runner.py`s Kahn-Wellen), editierbarer Inspector pro Slot, Browser-Validierung (Komfort-
+  Spiegel; `src/loader.py` bleibt Source of Truth), Export von `workflow.json` + `WORKFLOW.md`
+  komplett im Browser (byte-identisch gegen `src/export.py` verifiziert). „Run mit Gate" gibt nur
+  den CLI-Befehl aus — das UI führt selbst nichts aus.
 - **Dogfooding live** — `meta-workflow.json` hält die eigene Roadmap als DAG; vier der fünf
   Knoten (`unify-cli`, `package-project`, `runner-waves`, `orchestrator-resume`,
   `docs-concept`) wurden vom Tool selbst gebaut. Chronik: `BUILD_LOG.md`.
@@ -120,10 +126,10 @@ Vollständige Bau-Historie inkl. bekannter Umgebungs-Probleme (cmd.exe-vs-bash b
 
 ## Nächster Schritt
 
-1. **UI** — Single-File-HTML-Canvas (`docs/CC_PROMPT_ui_canvas.md` liegt bereit). Erste
-   endnutzer-zugewandte Schicht; Export-only läuft im Browser, "Run mit Gate" gibt den
-   CLI-Befehl aus.
-2. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird.
+1. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird (Windows
+   nutzt sonst cmd.exe; bash-Stil-Checks fallen durch — siehe `BUILD_LOG.md`).
+2. **UI-Polish / weitere Workflows** — `ui/canvas.html` steht; offen sind Feinschliff und ein
+   nicht-Dev-Workflow als Allgemeinheits-Beweis.
 
 ## Dateien
 
@@ -134,6 +140,7 @@ Vollständige Bau-Historie inkl. bekannter Umgebungs-Probleme (cmd.exe-vs-bash b
 | `docs/BUILD_LOG.md` | Bau-Chronik, Pipeline-Architektur, bekannte Probleme, nächste Schritte |
 | `docs/concept.md` | Gesamtkonzept (vom `docs-concept`-Knoten erzeugt) |
 | `schema/workflow.schema.json` | Datenmodell — Source of Truth |
+| `ui/canvas.html` | Single-File-Canvas-UI: laden, editieren, validieren, exportieren (Browser) |
 | `meta-workflow.json` | eigene Roadmap als ausführbarer Workflow (Dogfooding) |
 | `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Build-Historie) |
 | `docs/notes_2026-05-31_execution-und-kosten.md` | Execution-Stufen, Kosten-Routing, OpenClaw |
