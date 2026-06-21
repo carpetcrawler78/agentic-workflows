@@ -1,6 +1,6 @@
 # agentic-workflows — Projekt-Übersicht (Scope, Warum, Stand)
 
-Stand: 2026-06-10
+Stand: 2026-06-21 (Engine komplett; Chronik in `BUILD_LOG.md`)
 
 Diese Datei fasst zusammen, **was** das Projekt ist, **warum** es existiert und **was bisher
 erarbeitet** wurde. Sie ist der Einstiegspunkt; Details stehen in den verlinkten Dateien.
@@ -103,16 +103,27 @@ Zwei Kandidaten, Entscheidung steht aus:
 
 ## Bisher erarbeitet
 
-- **Konzept + Datenmodell-Entwurf** — `README.md` (DAG, Slots, Export-Targets).
-- **Execution- & Kosten-Tradeoffs** — `notes_2026-05-31_execution-und-kosten.md` (zwei
-  Reifestufen, Model-Routing, OpenClaw als Backend, Acceptance als ausführbarer Check).
-- **sandcastle-Analyse** — `sandcastle-master-slave-analysis.md` (Master/Slave-Mapping auf
-  sandcastle-Primitive, wiederverwenden vs. selbst bauen).
+- **Konzept + Datenmodell** — `README.md`, `schema/workflow.schema.json` (DAG, Slots,
+  ausführbarer acceptance-Check). Designdiskussionen in `notes_2026-05-31_*` und
+  `sandcastle-master-slave-analysis.md`.
+- **Engine komplett gebaut (2026-06-20/21)** — die gesamte Pipeline steht und ist getestet:
+  `loader` (validieren) → `export` (Artefakte + `WORKFLOW.md`) → `runner` (Topo + Wellen +
+  Zyklus-Check) → `executor` (acceptance-Gate) → `orchestrator` (verdrahtet alles,
+  Verify-Only vs. `--execute`, Checkpoint/Resume) → `cli` (gemeinsamer Entrypoint).
+  **46 Tests grün**, Beispiel-Workflow läuft end-to-end durchs Gate.
+- **Dogfooding live** — `meta-workflow.json` hält die eigene Roadmap als DAG; vier der fünf
+  Knoten (`unify-cli`, `package-project`, `runner-waves`, `orchestrator-resume`,
+  `docs-concept`) wurden vom Tool selbst gebaut. Chronik: `BUILD_LOG.md`.
+
+Vollständige Bau-Historie inkl. bekannter Umgebungs-Probleme (cmd.exe-vs-bash beim Executor,
+`tomllib`≥3.11): siehe `docs/BUILD_LOG.md`.
 
 ## Nächster Schritt
 
-`acceptance` als ausführbaren Check ins Datenmodell aufnehmen (`schema/workflow.schema.json`).
-Das ist der eigentliche Hebel und blockiert Stufe 2.
+1. **UI** — Single-File-HTML-Canvas (`docs/CC_PROMPT_ui_canvas.md` liegt bereit). Erste
+   endnutzer-zugewandte Schicht; Export-only läuft im Browser, "Run mit Gate" gibt den
+   CLI-Befehl aus.
+2. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird.
 
 ## Dateien
 
@@ -120,5 +131,10 @@ Das ist der eigentliche Hebel und blockiert Stufe 2.
 |---|---|
 | `README.md` | Pitch, Datenmodell-Entwurf, Export-Targets, Designfragen |
 | `docs/PROJECT_OVERVIEW.md` | diese Datei — Scope, Warum, Stand |
+| `docs/BUILD_LOG.md` | Bau-Chronik, Pipeline-Architektur, bekannte Probleme, nächste Schritte |
+| `docs/concept.md` | Gesamtkonzept (vom `docs-concept`-Knoten erzeugt) |
+| `schema/workflow.schema.json` | Datenmodell — Source of Truth |
+| `meta-workflow.json` | eigene Roadmap als ausführbarer Workflow (Dogfooding) |
+| `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Build-Historie) |
 | `docs/notes_2026-05-31_execution-und-kosten.md` | Execution-Stufen, Kosten-Routing, OpenClaw |
 | `docs/sandcastle-master-slave-analysis.md` | sandcastle als Stufe-2-Backend, Master/Slave |
