@@ -3,7 +3,7 @@
 Human-readbares Protokoll: was gebaut wurde, in welcher Reihenfolge, mit welchem Ergebnis,
 und nach welcher Methode. Ergänzt `PROJECT_OVERVIEW.md` (Scope/Warum) um die **Chronik**.
 
-Letzte Aktualisierung: 2026-06-21
+Letzte Aktualisierung: 2026-06-22
 
 ## Arbeitsmethode (wie hier gebaut wird)
 
@@ -61,11 +61,18 @@ Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` geb
     Checkpoint/Resume, `docs/concept.md`.
 11. **ui-canvas** (`CC_PROMPT_ui_canvas.md`) — `ui/canvas.html`, Single-File-Canvas-UI:
     laden/editieren/validieren/exportieren im Browser. Export byte-identisch gegen `src/export.py`.
+12. **executor-shell-fix** (`CC_PROMPT_executor_shell_fix.md`) — `src/executor.py` von
+    `subprocess.run(shell=True)` auf explizites `bash -lc` umgestellt (Default
+    `_DEFAULT_SHELL = ["bash", "-lc"]`, Pfadauflösung via `shutil.which` gegen den
+    WSL-Relay-Stub in System32). `shell`-Parameter additiv an `run_check`/`run_node`,
+    `FileNotFoundError` → `CheckResult(passed=False, exit_code=None)` statt Crash. +4 Tests.
 
-## Aktueller Stand (2026-06-21)
+## Aktueller Stand (2026-06-22)
 
 - **Engine komplett**, end-to-end lauffähig. Beispiel-Workflow läuft 3/3 durchs Gate.
-- **54 Tests grün** (loader 8, export 9, runner 13, executor 10, orchestrator 11, +meta 3).
+- **58 Tests grün** (loader 8, export 9, runner 13, executor 14, orchestrator 11, +meta 3).
+- **Executor plattformrobust**: `bash -lc` explizit gesetzt, Windows-WSL-Stub umgangen
+  (verifiziert 2026-06-22, alle Acceptance-Checks grün).
 - **meta-workflow 5/5** auf Thomas' Maschine (Python 3.11). Der Backlog der eigenen Roadmap
   ist damit abgearbeitet — das Tool hat seine eigenen nächsten Stufen selbst gebaut.
 - **UI gebaut**: `ui/canvas.html` (Single-File, keine Deps, kein Build-Step). Laden via
@@ -87,14 +94,11 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 
 ## Bekannte Probleme / Umgebungs-Annahmen (wichtig)
 
-- **Shell auf Windows:** `executor.py` nutzt `subprocess.run(shell=True)`. Auf Windows ist das
-  **cmd.exe**, nicht bash. acceptance-Kommandos im bash-Stil (`grep`, `test -f`, `pytest`)
-  schlagen dann fehl, wenn sie über `python -m src.cli run` aus einer Nicht-bash-Shell laufen —
-  obwohl sie funktionieren, wenn Claude Code sie in Git-Bash ausführt. Symptom: beim
-  meta-workflow-Lauf besteht nur `package-project` (pures `python -c`), der Rest fällt mit
-  "command not found". **Fix-Optionen:** (a) aus Git-Bash mit Coreutils+pytest im PATH starten,
-  (b) Executor auf explizites `bash -lc` umstellen (bevorzugt), (c) Checks portabel umschreiben
-  (verwässert das "echte Shell"-Prinzip — nur als bewusste Strategie, nicht als Workaround).
+- **Shell auf Windows (GELÖST 2026-06-22):** `executor.py` nutzte `subprocess.run(shell=True)`
+  — auf Windows cmd.exe, nicht bash, sodass bash-Stil-Checks (`grep`, `test -f`, `pytest`) nur
+  zufällig grün waren. Fix-Option (b) umgesetzt: explizites `bash -lc` mit `shutil.which`-
+  Pfadauflösung (umgeht den WSL-Relay-Stub in System32). Fehlt bash, gibt es ein sauberes
+  `CheckResult(passed=False)` statt Crash. Siehe Chronik-Knoten 12.
 - **tomllib braucht Python ≥ 3.11.** Der `package-project`-acceptance-Check
   (`python -c "import tomllib; ..."`) fällt auf Python 3.10. Bei Bedarf robuster: `tomli`-Fallback.
 - **git aus der Sandbox** scheitert auf gemounteten Windows-Ordnern — git-Befehle gehören in
@@ -102,12 +106,12 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 
 ## Nächste Schritte
 
-1. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird (Windows nutzt
-   sonst cmd.exe; bash-Stil-Checks fallen durch — siehe „Bekannte Probleme" oben).
-2. **UI-Polish** (`ui/canvas.html` steht): Feinschliff, ggf. Live-Mermaid-Preview, Round-Trip-
+1. **UI-Polish** (`ui/canvas.html` steht): Feinschliff, ggf. Live-Mermaid-Preview, Round-Trip-
    Härtung.
-3. Weitere meta-workflow-Knoten bzw. neue Workflows (z.B. ein nicht-Dev-Workflow als Beweis
+2. Weitere meta-workflow-Knoten bzw. neue Workflows (z.B. ein nicht-Dev-Workflow als Beweis
    der Allgemeinheit — Idee "Steuer-/Dokumenten-Sammler" wurde diskutiert, noch nicht gebaut).
+3. **tomllib-Fallback** (`package-project`-Check braucht Python ≥ 3.11) und README-Status
+   von "Konzeptphase" auf den realen Stand bringen — beides niedrige Prio.
 
 ## Verwandte Dateien
 

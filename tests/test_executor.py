@@ -93,3 +93,35 @@ def test_cwd_resolution(tmp_path):
     check = {"command": "ls", "cwd": "workdir", "expect": {"stdoutMatches": "marker.txt"}}
     result = run_check(check, defaults={}, cwd_root=str(tmp_path))
     assert result.passed
+
+
+def test_bash_only_syntax_runs():
+    check = {"command": "[[ 1 == 1 ]] && echo yes", "expect": {"stdoutMatches": "yes", "exitCode": 0}}
+    result = run_check(check)
+    assert result.passed
+
+
+def test_shell_override_is_used():
+    check = {"command": "echo ok", "expect": {"stdoutMatches": "ok"}}
+    result = run_check(check, shell=["bash", "-c"])
+    assert result.passed
+
+
+def test_missing_shell_fails_cleanly():
+    check = {"command": "echo ok", "expect": {"exitCode": 0}}
+    result = run_check(check, shell=["definitiv-kein-binary-xyz", "-lc"])
+    assert not result.passed
+    assert result.exit_code is None
+    assert not result.timed_out
+    assert any("definitiv-kein-binary-xyz" in reason or "nicht gefunden" in reason for reason in result.reasons)
+
+
+def test_run_node_passes_shell_through():
+    node = {
+        "id": "bash-only-node",
+        "acceptance": [
+            {"command": "[[ 1 == 1 ]] && echo yes", "expect": {"stdoutMatches": "yes"}},
+        ],
+    }
+    result = run_node(node, shell=["bash", "-lc"])
+    assert result.passed
