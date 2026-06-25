@@ -247,6 +247,91 @@ def test_workspace_none_unchanged(monkeypatch, tmp_path):
     assert result.passed
 
 
+def test_parallel_wave_merges_in_deterministic_order(monkeypatch, tmp_path):
+    """max_parallel=2: b und c (gleiche Welle) werden gemergt; Merge-Reihenfolge deterministisch."""
+    merge_calls = []
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        merge_calls.append(branch)
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    def fake_remove_worktree(repo_root, worktree, **kwargs):
+        pass
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", fake_remove_worktree)
+
+    def fake_agent(node, prompt):
+        pass
+
+    # Workflow: a -> b, a -> c (b + c in gleicher Welle nach a)
+    workflow = _workflow(
+        [_node("a"), _node("b"), _node("c")],
+        [{"from": "a", "to": "b"}, {"from": "a", "to": "c"}],
+    )
+    result = run_workflow(
+        workflow,
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+        max_parallel=2,
+    )
+    assert result.passed
+    assert set(merge_calls) == {"agent/a", "agent/b", "agent/c"}
+    # b erscheint vor c in nodes[] -> b vor c gemergt
+    assert merge_calls.index("agent/b") < merge_calls.index("agent/c")
+
+
+def test_parallel_max1_same_as_sequential(monkeypatch, tmp_path):
+    """max_parallel=1 -> sequenzieller Pfad (unveraendert gegenueber Phase 2)."""
+    merge_calls = _patch_workspace(monkeypatch, tmp_path)
+
+    def fake_agent(node, prompt):
+        pass
+
+    result = run_workflow(
+        _workflow([_node("a"), _node("b")], [{"from": "a", "to": "b"}]),
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+        max_parallel=1,
+    )
+    assert result.passed
+    assert "agent/a" in merge_calls
+    assert "agent/b" in merge_calls
+
+
+def test_parallel_red_gate_no_merge(monkeypatch, tmp_path):
+    """Rotes Gate in paralleler Welle: kein merge fuer diesen Knoten."""
+    merge_calls = []
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        merge_calls.append(branch)
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", lambda *a, **kw: None)
+
+    def fake_agent(node, prompt):
+        pass
+
+    workflow = _workflow([_node("a", command="false")], [])
+    result = run_workflow(
+        workflow,
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+        max_parallel=2,
+    )
+    assert not result.passed
+    assert merge_calls == []
+
+
 def test_workspace_agent_exception_kept_no_merge(monkeypatch, tmp_path):
     """Agent-Exception im workspace-Modus: kein merge, remove_worktree aufgerufen."""
     merge_calls = []

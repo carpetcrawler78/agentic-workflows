@@ -42,8 +42,6 @@ def _cmd_run(args):
     if args.sandbox:
         from sandbox_agent import make_sandbox_agent
         from orchestrator import Workspace
-        if args.max_parallel > 1:
-            print(f"Hinweis: --max-parallel {args.max_parallel} noch nicht implementiert; laufe sequenziell.")
         agent = make_sandbox_agent(image=args.image, memory_limit=args.memory)
         workspace = Workspace(repo_root=args.cwd)
     elif args.execute:
@@ -56,6 +54,7 @@ def _cmd_run(args):
         cwd_root=args.cwd,
         stop_on_failure=not args.no_stop,
         workspace=workspace,
+        max_parallel=args.max_parallel,
     )
     _print_summary(workflow_run)
     return 0 if workflow_run.passed else 1

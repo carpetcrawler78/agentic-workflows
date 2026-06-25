@@ -6,19 +6,20 @@ Claude-Code-Aufruf testbar bleibt."""
 import argparse
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 try:
     from .loader import validate_workflow, validate_workflow_file
-    from .runner import topological_order
+    from .runner import topological_order, topological_waves
     from .executor import run_node, CheckResult, NodeResult
     from .export import render_node
     from .sandbox import create_worktree, merge_back, remove_worktree
 except ImportError:
     from loader import validate_workflow, validate_workflow_file
-    from runner import topological_order
+    from runner import topological_order, topological_waves
     from executor import run_node, CheckResult, NodeResult
     from export import render_node
     from sandbox import create_worktree, merge_back, remove_worktree
@@ -85,6 +86,84 @@ def _write_checkpoint(checkpoint_path, passed_node_ids):
         json.dump({"passed_node_ids": passed_node_ids}, f)
 
 
+def _run_one_node_for_wave(node_id, nodes_by_id, defaults, agent, workspace):
+    """Per-Knoten-Logik fuer den parallelen Wellen-Modus (ohne Merge-Schritt).
+
+    Gibt (node_id, result, worktree) bei Erfolg zurueck.
+    Bei Agent-Fehler: (node_id, None, exc) -- worktree wird entfernt."""
+    node = nodes_by_id[node_id]
+    prompt = render_node(node, defaults)
+    worktree = create_worktree(workspace.repo_root, node_id)
+    node_ctx = {**node, "_worktree": worktree}
+    try:
+        agent(node_ctx, prompt)
+    except Exception as exc:
+        remove_worktree(workspace.repo_root, worktree)
+        return node_id, None, exc
+    result = run_node(node, defaults, cwd_root=worktree.path)
+    return node_id, result, worktree
+
+
+def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failure):
+    """Parallele Workflow-Ausfuehrung ueber topological_waves + ThreadPoolExecutor.
+
+    Innerhalb jeder Welle laufen Knoten nebenlaeufig (max_workers=max_parallel).
+    Merges erfolgen nach jeder Welle in deterministischer Wellen-Reihenfolge.
+    stop_on_failure: nach Wellen-Abschluss -- laufende Knoten werden nicht abgebrochen."""
+    validate_workflow(workflow)
+    waves = topological_waves(workflow)
+    defaults = workflow.get("defaults", {})
+    nodes_by_id = {node["id"]: node for node in workflow["nodes"]}
+    order = [nid for wave in waves for nid in wave]
+
+    all_runs = []
+    stopped = False
+
+    for wave in waves:
+        if stopped:
+            for nid in wave:
+                all_runs.append(
+                    NodeRun(node_id=nid, skipped=True, agent_invoked=False, result=None, passed=False)
+                )
+            continue
+
+        wave_outcomes = {}
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            futures = {
+                executor.submit(_run_one_node_for_wave, nid, nodes_by_id, defaults, agent, workspace): nid
+                for nid in wave
+            }
+            for future, nid in futures.items():
+                try:
+                    wave_outcomes[nid] = future.result()
+                except Exception as exc:
+                    wave_outcomes[nid] = (nid, None, exc)
+
+        # Merge in deterministischer Wellen-Reihenfolge (verhindert nicht-reproduzierbare Merge-Sequenz).
+        for nid in wave:
+            _, result, worktree_or_exc = wave_outcomes[nid]
+            if result is None:
+                err_result = _agent_error_result(nid, worktree_or_exc)
+                all_runs.append(
+                    NodeRun(node_id=nid, skipped=False, agent_invoked=True, result=err_result, passed=False)
+                )
+                if stop_on_failure:
+                    stopped = True
+            else:
+                worktree = worktree_or_exc
+                if result.passed:
+                    merge_back(workspace.repo_root, worktree.branch, "HEAD")
+                    remove_worktree(workspace.repo_root, worktree)
+                all_runs.append(
+                    NodeRun(node_id=nid, skipped=False, agent_invoked=True, result=result, passed=result.passed)
+                )
+                if not result.passed and stop_on_failure:
+                    stopped = True
+
+    overall_passed = all(run.passed for run in all_runs)
+    return WorkflowRun(order=order, runs=all_runs, passed=overall_passed)
+
+
 def _run_workspace_node(node, prompt, agent, workspace, defaults):
     """Pro-Knoten-Logik im Workspace-Modus: worktree -> agent -> gate -> merge/keep.
 
@@ -105,7 +184,7 @@ def _run_workspace_node(node, prompt, agent, workspace, defaults):
     return result
 
 
-def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None):
+def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1):
     """Validiert den Workflow, bestimmt die Topo-Reihenfolge und fuehrt pro Knoten
     den optionalen Agent-Schritt plus das acceptance-Gate aus. Bei Fehlschlag wird
     per Default gestoppt, die restlichen Knoten werden als skipped markiert.
@@ -115,6 +194,9 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
     vermerkte Knoten uebersprungen (skipped=True, agent_invoked=False, passed=True)
     und der Lauf setzt beim ersten offenen Knoten fort. Ohne checkpoint_path ist das
     Verhalten exakt wie zuvor."""
+    if workspace is not None and max_parallel > 1 and agent is not None:
+        return _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failure)
+
     validate_workflow(workflow)
     order = topological_order(workflow)
     defaults = workflow.get("defaults", {})
@@ -191,7 +273,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
     return WorkflowRun(order=order, runs=runs, passed=overall_passed)
 
 
-def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None):
+def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1):
     """Liest+parst die Workflow-Datei (loader.validate_workflow_file) und ruft run_workflow."""
     workflow = validate_workflow_file(path)
     return run_workflow(
@@ -202,6 +284,7 @@ def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, chec
         checkpoint_path=checkpoint_path,
         resume=resume,
         workspace=workspace,
+        max_parallel=max_parallel,
     )
 
 
