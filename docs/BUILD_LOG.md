@@ -3,7 +3,7 @@
 Human-readbares Protokoll: was gebaut wurde, in welcher Reihenfolge, mit welchem Ergebnis,
 und nach welcher Methode. Ergänzt `PROJECT_OVERVIEW.md` (Scope/Warum) um die **Chronik**.
 
-Letzte Aktualisierung: 2026-06-22 (UI-Polish)
+Letzte Aktualisierung: 2026-06-25 (Stufe-2-Backend)
 
 ## Arbeitsmethode (wie hier gebaut wird)
 
@@ -115,18 +115,44 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 - **git aus der Sandbox** scheitert auf gemounteten Windows-Ordnern — git-Befehle gehören in
   Thomas' eigenes Terminal (Memory `sandbox-git-on-windows-mount`).
 
-## Nächste Schritte
+## Chronik -- Stufe-2-Backend (2026-06-25)
 
-1. **Stufe 2 — Sandbox-Backend bauen (großer Brocken).** Backend-Entscheidung getroffen
-   (2026-06-25, `DECISION_backend.md`): sandcastle nicht portieren, die ~3 Primitive
-   (git-worktree + docker-sandbox + merge-back + strukturierter Output) in Python nachbauen
-   (Fallback OpenHands); Master-Scheduler mit Gating obendrauf; Worker = Sonnet/API (Hetzner
-   ohne GPU); sequenziell zuerst, später max. 2-3 Slaves mit `--memory`-Limit. OpenClaw raus
-   als Backend, höchstens optionaler Stufe-3-Trigger/Notification-Layer. Bau-Auftrag:
-   `docs/CC_PROMPT_stage2_executor_backend.md`.
-2. **Kleinkram (niedrige Prio):** uncommitted UI-Polish einchecken, **tomllib-Fallback**
-   (`package-project`-Check braucht Python ≥ 3.11), README-Status von "Konzeptphase" auf den
-   realen Stand, nicht-Dev-Workflow als Allgemeinheits-Beweis.
+Bau-Auftrag: `docs/CC_PROMPT_stage2_full_epic.md` (7-Phasen-Epic, autonom ausgefuehrt).
+Vorbefund: 17/58 Tests rot (WSL-Bash-Stub). Behoben als Pre-Phase-Commit vor Phase 1.
+
+| Commit | Phase | Inhalt | Tests |
+|---|---|---|---|
+| `6f23cce` | Bash-Fix | `_find_bash()`, Kandidatenliste, WSL-Stub-Verwerfung | 61 gruen |
+| `e9bc48c` | 1 | `sandbox.py`: git-worktree + docker-sandbox + merge-back + `parse_tagged_output` | 87 gruen |
+| `c38a066` | 2 | `sandbox_agent.py`: Claude CLI in Container; `Workspace`-Dataclass + `_run_workspace_node` in Orchestrator; `--sandbox/--image/--memory` CLI-Flags | 101 gruen |
+| `bab72dd` | 3 | `Dockerfile` (node:20-slim, claude-code via npm); `docs/IMAGE.md` als Spec (Docker Daemon nicht aktiv, deferred) | 101 gruen |
+| `e3858e7` | 4 | `_run_workflow_waves()` via `ThreadPoolExecutor` + `topological_waves`; deterministischer Merge in Wellen-Reihenfolge; `max_parallel=1` unveraendert sequenziell | 104 gruen |
+| `f0624ff` | 5 | `planner.py`: `PLAN_SCHEMA`, `extract_plan_from_json` (Claude nativer JSON-Output), `extract_plan_from_tagged` (XML-Fallback), `expand_plan(plan) -> (nodes, edges)` | 120 gruen |
+| `a60cffd` | 6 | `docs/STAGE2_RUNBOOK.md` (Hetzner-Schritte); `examples/smoke-stage2.json` (1-Knoten, validate ok) | 120 gruen |
+| `ba35319` | 7 | `docs/STAGE3_OPENCLAW.md` (Architektur-Spec, dezentrale Worker via git); `src/openclaw_stub.py` (NotImplementedError) | 120 gruen |
+
+### Abweichungen / Entscheidungen
+
+- **Phase 5 `expand_plan`-Signatur**: Spec sagte `list[node-dict]`, implementiert als `(nodes, edges)` da
+  `dependsOn` sonst nicht in Kanten uebersetzt werden kann. Sinnvoller als die Spezifikation.
+- **Phase 3 deferred**: Docker-Daemon nicht aktiv auf Thomas' Windows-Maschine -- `IMAGE.md` als
+  vollstaendige Build-Spec, echter Build auf Hetzner (Schritt 4 im Runbook).
+- **Bash-Fix Pre-Phase**: `shutil.which("bash")` lieferte auf Windows den WSL-System32-Stub statt
+  Git Bash. Fix: `_find_bash()` mit expliziten Kandidaten und `bash -lc "true"` Probe.
+
+## Aktueller Stand (2026-06-25)
+
+- **Stufe-2-Backend vollstaendig** (Code-seitig), 7 Commits, 120 Tests gruen.
+- **Offen (Thomas' Schritte):** Docker-Image bauen auf Hetzner (Schritt 4 im Runbook),
+  Smoke-Lauf (Schritt 5), dann ersten echten Workflow-Knoten per `--sandbox` ausfuehren.
+- **Stage 3 (OpenClaw):** Spec vorhanden, Implementierung deferred.
+
+## Naechste Schritte
+
+1. **Hetzner-Lauf:** `docs/STAGE2_RUNBOOK.md` Schritt fuer Schritt (Thomas per SSH).
+2. **Image pinnen:** Nach erstem Build `docs/IMAGE.md` mit tatsaechlicher CLI-Version aktualisieren.
+3. **Kleinkram (niedrige Prio):** tomllib-Fallback (`package-project`-Check braucht Python >= 3.11),
+   README-Status aktualisieren.
 
 ## Verwandte Dateien
 
