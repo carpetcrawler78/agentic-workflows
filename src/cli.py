@@ -37,7 +37,16 @@ def _cmd_export(args):
 
 def _cmd_run(args):
     agent = None
-    if args.execute:
+    workspace = None
+
+    if args.sandbox:
+        from sandbox_agent import make_sandbox_agent
+        from orchestrator import Workspace
+        if args.max_parallel > 1:
+            print(f"Hinweis: --max-parallel {args.max_parallel} noch nicht implementiert; laufe sequenziell.")
+        agent = make_sandbox_agent(image=args.image, memory_limit=args.memory)
+        workspace = Workspace(repo_root=args.cwd)
+    elif args.execute:
         print("Hinweis: --execute ruft echtes Claude Code auf -- 'claude' muss auf dem PATH sein.")
         agent = make_claude_agent()
 
@@ -46,6 +55,7 @@ def _cmd_run(args):
         agent=agent,
         cwd_root=args.cwd,
         stop_on_failure=not args.no_stop,
+        workspace=workspace,
     )
     _print_summary(workflow_run)
     return 0 if workflow_run.passed else 1
@@ -75,6 +85,11 @@ def main(argv=None):
     parser_run.add_argument("--cwd", default=".", help="Root-Verzeichnis fuer acceptance-Kommandos (Default: .)")
     parser_run.add_argument("--no-stop", action="store_true", help="Bei Fehlschlag nicht abbrechen")
     parser_run.add_argument("--execute", action="store_true", help="Echten Claude-Code-Agenten aufrufen")
+    parser_run.add_argument("--sandbox", action="store_true", help="Stufe-2-Backend: docker + git-worktree pro Knoten")
+    parser_run.add_argument("--image", default="aw-sandbox:dev", help="Container-Image (Default: aw-sandbox:dev)")
+    parser_run.add_argument("--memory", default="1.5g", help="Container-Memory-Limit (Default: 1.5g)")
+    parser_run.add_argument("--max-parallel", type=int, default=1, metavar="N", dest="max_parallel",
+                            help="Parallele Knoten (Default: 1; >1 noch nicht implementiert)")
     parser_run.set_defaults(func=_cmd_run)
 
     args = parser.parse_args(argv)

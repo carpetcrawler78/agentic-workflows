@@ -15,14 +15,24 @@ try:
     from .runner import topological_order
     from .executor import run_node, CheckResult, NodeResult
     from .export import render_node
+    from .sandbox import create_worktree, merge_back, remove_worktree
 except ImportError:
     from loader import validate_workflow, validate_workflow_file
     from runner import topological_order
     from executor import run_node, CheckResult, NodeResult
     from export import render_node
+    from sandbox import create_worktree, merge_back, remove_worktree
 
 # (node, gerenderter_prompt) -> None. Wirft der Agent, gilt der Knoten als fehlgeschlagen.
 Agent = Callable[[dict, str], None]
+
+
+@dataclass
+class Workspace:
+    """Konfiguration fuer den Stufe-2-Workspace-Modus (docker + git-worktree).
+
+    repo_root: Verzeichnis, in dem Worktrees angelegt werden (.aw-worktrees/<node-id>)."""
+    repo_root: str
 
 
 @dataclass
@@ -75,7 +85,27 @@ def _write_checkpoint(checkpoint_path, passed_node_ids):
         json.dump({"passed_node_ids": passed_node_ids}, f)
 
 
-def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False):
+def _run_workspace_node(node, prompt, agent, workspace, defaults):
+    """Pro-Knoten-Logik im Workspace-Modus: worktree -> agent -> gate -> merge/keep.
+
+    Gibt NodeResult zurueck. Wirft, wenn der Agent eine Exception wirft (der
+    aeussere run_workflow-Handler faengt das dann als _agent_error_result ab)."""
+    worktree = create_worktree(workspace.repo_root, node["id"])
+    node_ctx = {**node, "_worktree": worktree}
+    try:
+        agent(node_ctx, prompt)
+    except Exception:
+        remove_worktree(workspace.repo_root, worktree)
+        raise
+    result = run_node(node, defaults, cwd_root=worktree.path)
+    if result.passed:
+        merge_back(workspace.repo_root, worktree.branch, "HEAD")
+        remove_worktree(workspace.repo_root, worktree)
+    # Rotes Gate: worktree erhalten fuer Inspektion, kein merge.
+    return result
+
+
+def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None):
     """Validiert den Workflow, bestimmt die Topo-Reihenfolge und fuehrt pro Knoten
     den optionalen Agent-Schritt plus das acceptance-Gate aus. Bei Fehlschlag wird
     per Default gestoppt, die restlichen Knoten werden als skipped markiert.
@@ -112,11 +142,12 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
         node = nodes_by_id[node_id]
         agent_invoked = False
 
-        if agent is not None:
+        if workspace is not None and agent is not None:
+            # Workspace-Modus: worktree -> agent im Container -> Gate -> merge/keep.
             prompt = render_node(node, defaults)
             agent_invoked = True
             try:
-                agent(node, prompt)
+                result = _run_workspace_node(node, prompt, agent, workspace, defaults)
             except Exception as exc:
                 result = _agent_error_result(node_id, exc)
                 runs.append(
@@ -127,8 +158,24 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
                 if checkpoint_path is not None:
                     _write_checkpoint(checkpoint_path, passed_node_ids)
                 continue
+        else:
+            if agent is not None:
+                prompt = render_node(node, defaults)
+                agent_invoked = True
+                try:
+                    agent(node, prompt)
+                except Exception as exc:
+                    result = _agent_error_result(node_id, exc)
+                    runs.append(
+                        NodeRun(node_id=node_id, skipped=False, agent_invoked=True, result=result, passed=False)
+                    )
+                    if stop_on_failure:
+                        stopped = True
+                    if checkpoint_path is not None:
+                        _write_checkpoint(checkpoint_path, passed_node_ids)
+                    continue
+            result = run_node(node, defaults, cwd_root)
 
-        result = run_node(node, defaults, cwd_root)
         runs.append(
             NodeRun(node_id=node_id, skipped=False, agent_invoked=agent_invoked, result=result, passed=result.passed)
         )
@@ -144,7 +191,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
     return WorkflowRun(order=order, runs=runs, passed=overall_passed)
 
 
-def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False):
+def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None):
     """Liest+parst die Workflow-Datei (loader.validate_workflow_file) und ruft run_workflow."""
     workflow = validate_workflow_file(path)
     return run_workflow(
@@ -154,6 +201,7 @@ def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, chec
         stop_on_failure=stop_on_failure,
         checkpoint_path=checkpoint_path,
         resume=resume,
+        workspace=workspace,
     )
 
 

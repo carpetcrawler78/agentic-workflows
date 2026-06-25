@@ -9,9 +9,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import orchestrator
-from orchestrator import make_claude_agent, run_workflow
+from orchestrator import Workspace, make_claude_agent, run_workflow
 from loader import WorkflowValidationError
 from runner import topological_order
+from sandbox import MergeResult, Worktree
 
 
 def _node(node_id, command="true", exit_code=0):
@@ -170,6 +171,115 @@ def test_resume_after_abort_skips_passed_nodes(tmp_path):
     run_c = next(r for r in second.runs if r.node_id == "c")
     assert run_c.skipped is False
     assert run_c.passed is True
+
+
+# ---------------------------------------------------------------------------
+# Workspace-Integration: FAKE-Workspace (kein echter docker/git)
+# ---------------------------------------------------------------------------
+
+
+def _patch_workspace(monkeypatch, tmp_path):
+    """Ersetzt create_worktree / merge_back / remove_worktree durch Fakes.
+    Gibt merge_calls-Liste zurueck fuer Assertions."""
+    merge_calls = []
+
+    def fake_create_worktree(repo_root, node_id, base="HEAD", **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base=base)
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        merge_calls.append(branch)
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    def fake_remove_worktree(repo_root, worktree, **kwargs):
+        pass
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", fake_remove_worktree)
+    return merge_calls
+
+
+def test_workspace_merge_on_green_gate(monkeypatch, tmp_path):
+    """Gruenes Gate im workspace-Modus -> merge_back wird aufgerufen."""
+    merge_calls = _patch_workspace(monkeypatch, tmp_path)
+
+    def fake_agent(node, prompt):
+        pass
+
+    result = run_workflow(
+        _workflow([_node("a")]),
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+    )
+    assert result.passed
+    assert "agent/a" in merge_calls
+
+
+def test_workspace_no_merge_on_red_gate(monkeypatch, tmp_path):
+    """Rotes Gate im workspace-Modus -> kein merge_back."""
+    merge_calls = _patch_workspace(monkeypatch, tmp_path)
+
+    def fake_agent(node, prompt):
+        pass
+
+    result = run_workflow(
+        _workflow([_node("a", command="false")]),
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+    )
+    assert not result.passed
+    assert merge_calls == []
+
+
+def test_workspace_none_unchanged(monkeypatch, tmp_path):
+    """workspace=None -> bisheriges Verhalten unveraendert (kein worktree)."""
+    calls = []
+
+    def fake_agent(node, prompt):
+        calls.append(node["id"])
+
+    result = run_workflow(
+        _workflow([_node("a"), _node("b")], [{"from": "a", "to": "b"}]),
+        agent=fake_agent,
+        workspace=None,
+    )
+    assert calls == ["a", "b"]
+    assert result.passed
+
+
+def test_workspace_agent_exception_kept_no_merge(monkeypatch, tmp_path):
+    """Agent-Exception im workspace-Modus: kein merge, remove_worktree aufgerufen."""
+    merge_calls = []
+    remove_calls = []
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        merge_calls.append(branch)
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    def fake_remove_worktree(repo_root, worktree, **kwargs):
+        remove_calls.append(worktree.branch)
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", fake_remove_worktree)
+
+    def bad_agent(node, prompt):
+        raise RuntimeError("container crash")
+
+    result = run_workflow(
+        _workflow([_node("a")]),
+        agent=bad_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+    )
+    assert not result.passed
+    assert merge_calls == []
+    assert "agent/a" in remove_calls
+
+
+# ---------------------------------------------------------------------------
 
 
 def test_make_claude_agent_builds_command(monkeypatch):
