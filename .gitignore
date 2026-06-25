@@ -34,3 +34,6 @@ npm-debug.log*
 # Claude
 .claude/local/
 .claude/settings.local.json
+
+# Stufe-2 Worktrees (temporaere git-Arbeitskopien pro Agent-Knoten)
+.aw-worktrees/
