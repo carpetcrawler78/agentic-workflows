@@ -9,13 +9,58 @@ Code-Ausfuehrung auf dieser Maschine. Nur Workflows aus vertrauenswuerdiger Quel
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 _DEFAULT_TIMEOUT_SECONDS = 120
+
+# Explizite Git-Bash-Installationspfade (Windows only); auf Linux/Mac leer.
+_EXPLICIT_BASH_CANDIDATES = (
+    [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    if sys.platform == "win32"
+    else []
+)
+
+# Teilstrings, anhand derer WSL-Relay-Stubs erkannt werden (case-insensitive).
+_WSL_BASH_MARKERS = [r"system32\bash", r"windowsapps\bash"]
+
+
+def _find_bash(which_fn=None, run_fn=None):
+    """Findet eine funktionierende bash (returncode 0 fuer 'bash -lc true').
+
+    Strategie (Windows): explizite Git-Bash-Pfade -> shutil.which-Ergebnis
+    AUSSER bekannte WSL-Relay-Stubs -> raw 'bash' als letzter Fallback.
+    Auf Linux/Mac: direkt shutil.which / 'bash'."""
+    which_fn = which_fn or shutil.which
+    run_fn = run_fn or subprocess.run
+
+    candidates = list(_EXPLICIT_BASH_CANDIDATES)
+    which_result = which_fn("bash")
+    if which_result:
+        lower = which_result.lower()
+        if not any(m in lower for m in _WSL_BASH_MARKERS):
+            candidates.append(which_result)
+    if "bash" not in candidates:
+        candidates.append("bash")
+
+    for candidate in candidates:
+        try:
+            r = run_fn([candidate, "-lc", "true"], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                return candidate
+        except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+            continue
+    return "bash"
+
+
+_DEFAULT_BASH = _find_bash()
 # Explizite Shell statt globalem subprocess-Shell-Flag: auf Windows waere das sonst cmd.exe,
 # acceptance-Checks sind aber bash-Stil (grep, test -f, pytest, Pipes, Globs).
-_DEFAULT_SHELL = ["bash", "-lc"]
+_DEFAULT_SHELL = [_DEFAULT_BASH, "-lc"]
 
 
 @dataclass
@@ -80,9 +125,13 @@ def run_check(check, defaults=None, cwd_root=".", shell=None):
     command = check["command"]
     timeout_seconds = check.get("timeoutSeconds", _DEFAULT_TIMEOUT_SECONDS)
     resolved_cwd = _resolve_cwd(check, defaults, cwd_root)
-    # shutil.which statt rohem Namen: Windows' CreateProcess-Suche prueft System32 vor PATH
-    # und faende dort sonst den WSL-Relay-Stub "bash.exe" statt Git Bash.
-    executable = shutil.which(shell[0]) or shell[0]
+    # Roher "bash"-Name wird auf den bereits aufgeloesten _DEFAULT_BASH umgeleitet,
+    # damit kein WSL-Relay-Stub per shutil.which zurueckkommen kann.
+    cmd = shell[0]
+    if cmd == "bash":
+        executable = _DEFAULT_BASH
+    else:
+        executable = shutil.which(cmd) or cmd
 
     try:
         result = subprocess.run(

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from executor import run_check, run_node
+from executor import _EXPLICIT_BASH_CANDIDATES, _find_bash, run_check, run_node
 
 
 def test_success_stdout_matches():
@@ -125,3 +125,61 @@ def test_run_node_passes_shell_through():
     }
     result = run_node(node, shell=["bash", "-lc"])
     assert result.passed
+
+
+# --- Tests fuer _find_bash ---
+
+
+def test_find_bash_rejects_wsl_stub():
+    """WSL-Relay-Stubs (System32/WindowsApps) duerfen nicht geprobt werden."""
+    if sys.platform != "win32":
+        pytest.skip("WSL-Stub-Check nur auf Windows relevant")
+    probed = []
+
+    def fake_run(cmd, **kwargs):
+        probed.append(cmd[0])
+
+        class R:
+            returncode = 1
+
+        return R()
+
+    _find_bash(
+        which_fn=lambda _: r"C:\Windows\System32\bash.EXE",
+        run_fn=fake_run,
+    )
+    assert not any("System32" in p or "WindowsApps" in p for p in probed)
+
+
+def test_find_bash_returns_first_working_candidate():
+    """Erster Kandidat mit returncode 0 wird zurueckgegeben."""
+    if not _EXPLICIT_BASH_CANDIDATES:
+        pytest.skip("Explizite Kandidaten nur auf Windows relevant")
+    expected = _EXPLICIT_BASH_CANDIDATES[0]
+    probed = []
+
+    def fake_run(cmd, **kwargs):
+        probed.append(cmd[0])
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    result = _find_bash(which_fn=lambda _: None, run_fn=fake_run)
+    assert result == expected
+    assert probed[0] == expected
+
+
+def test_find_bash_uses_which_when_not_wsl():
+    """Nicht-WSL which-Ergebnis wird aufgenommen und bei Erfolg zurueckgegeben."""
+    custom = "/usr/local/bin/bash"
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0 if cmd[0] == custom else 1
+
+        return R()
+
+    result = _find_bash(which_fn=lambda _: custom, run_fn=fake_run)
+    assert result == custom
