@@ -109,6 +109,16 @@
   #validatePanel.bad ul { color: var(--err); margin: 0; padding-left: 20px; }
   #validatePanel .ok-msg { color: var(--ok); font-weight: 600; }
 
+  #mermaidPanel {
+    border-top: 1px solid var(--border); padding: 10px 16px; max-height: 260px; overflow-y: auto; background: var(--panel);
+    font-size: 12px; display: none;
+  }
+  #mermaidPanel.show { display: block; }
+  #mermaidPanel .mermaid-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  #mermaidPanel .mermaid-panel-head span { font-weight: 600; color: var(--muted); }
+  #mermaidPanel .mermaid-panel-head button { font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); cursor: pointer; }
+  #mermaidPanel pre { background: #1f2430; color: #e8eaf0; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 0; }
+
   #runDialog, #previewDialog {
     position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; z-index: 100;
   }
@@ -128,7 +138,9 @@
     <input type="file" id="filePicker" accept="application/json,.json" style="display:none">
   </label>
   <button id="btnValidate">Validieren</button>
+  <button id="btnRoundtrip">Round-Trip pruefen</button>
   <button id="btnPreview">Knoten-Vorschau</button>
+  <button id="btnMermaid">Mermaid-Source</button>
   <button id="btnExportJson">workflow.json exportieren</button>
   <button id="btnExportMd">WORKFLOW.md exportieren</button>
   <button id="btnRun" class="primary">Run-Befehl anzeigen</button>
@@ -153,6 +165,17 @@
 </main>
 
 <div id="validatePanel"></div>
+
+<div id="mermaidPanel">
+  <div class="mermaid-panel-head">
+    <span>Mermaid-Source (WORKFLOW.md)</span>
+    <div>
+      <button id="btnCopyMermaid">In Zwischenablage kopieren</button>
+      <button id="btnCloseMermaidPanel">Schliessen</button>
+    </div>
+  </div>
+  <pre id="mermaidPanelText"></pre>
+</div>
 
 <div id="dropOverlay">workflow.json hier ablegen</div>
 
@@ -191,6 +214,7 @@
  * ------------------------------------------------------------------- */
 var workflow = null;       // In-Memory Workflow-Objekt (entspricht schema/workflow.schema.json)
 var selectedNodeId = null; // aktuell im Inspector angezeigter Knoten
+var originalRawText = null; // Roh-JSON-Text beim letzten Laden, fuer den Round-Trip-Diff-Check
 
 var MODEL_DEFAULT = "sonnet";
 var KIND_DEFAULT = "command";
@@ -204,8 +228,6 @@ var KIND_VALUES = ["command", "agent"];
 function loadWorkflow(obj) {
   workflow = obj;
   if (!Array.isArray(workflow.nodes)) workflow.nodes = [];
-  if (!Array.isArray(workflow.edges)) workflow.edges = [];
-  if (!workflow.defaults) workflow.defaults = {};
   selectedNodeId = null;
   document.getElementById("canvasEmpty").style.display = "none";
   renderCanvas();
@@ -222,6 +244,7 @@ function loadWorkflowFromText(text) {
     alert("JSON konnte nicht geparst werden: " + e.message);
     return;
   }
+  originalRawText = text;
   loadWorkflow(obj);
 }
 
@@ -239,7 +262,7 @@ function loadWorkflowFromFile(file) {
 function updateWorkflowMeta() {
   var el = document.getElementById("workflowMeta");
   if (!workflow) { el.textContent = ""; return; }
-  el.textContent = (workflow.name || "(ohne Namen)") + " - " + workflow.nodes.length + " Knoten, " + workflow.edges.length + " Kanten";
+  el.textContent = (workflow.name || "(ohne Namen)") + " - " + workflow.nodes.length + " Knoten, " + (workflow.edges || []).length + " Kanten";
 }
 
 /* ---------------------------------------------------------------------
@@ -350,6 +373,7 @@ function renderCanvas() {
     document.getElementById("canvasEmpty").style.display = "flex";
     svg.setAttribute("width", 0);
     svg.setAttribute("height", 0);
+    refreshMermaidPanel();
     return;
   }
   document.getElementById("canvasEmpty").style.display = "none";
@@ -430,6 +454,8 @@ function renderCanvas() {
     card.addEventListener("click", function () { selectNode(node.id); });
     nodesLayer.appendChild(card);
   });
+
+  refreshMermaidPanel();
 }
 
 /* ---------------------------------------------------------------------
@@ -458,9 +484,9 @@ function renderInspector() {
     return;
   }
 
-  if (!Array.isArray(node.inputs)) node.inputs = [];
-  if (!Array.isArray(node.constraints)) node.constraints = [];
-  if (!Array.isArray(node.acceptance)) node.acceptance = [];
+  var inputsList = Array.isArray(node.inputs) ? node.inputs : [];
+  var constraintsList = Array.isArray(node.constraints) ? node.constraints : [];
+  var acceptanceList = Array.isArray(node.acceptance) ? node.acceptance : [];
 
   var html = '<h2>Knoten: <span class="mono">' + escapeHtml(node.id) + '</span></h2>';
 
@@ -469,9 +495,9 @@ function renderInspector() {
   html += fieldSelect("kind", "Kind", KIND_VALUES, node.kind || "");
   html += fieldSelect("model", "Model", MODEL_VALUES, node.model || "");
 
-  html += listField("inputs", "Inputs", node.inputs);
-  html += listField("constraints", "Constraints", node.constraints);
-  html += acceptanceField(node.acceptance);
+  html += listField("inputs", "Inputs", inputsList);
+  html += listField("constraints", "Constraints", constraintsList);
+  html += acceptanceField(acceptanceList);
 
   html += fieldTextarea("comments", "Comments", node.comments || "");
 
@@ -560,6 +586,7 @@ function wireInspectorEvents(node) {
   panel.querySelectorAll("[data-list-add]").forEach(function (el) {
     el.addEventListener("click", function () {
       var key = el.dataset.listAdd;
+      if (!Array.isArray(node[key])) node[key] = [];
       node[key].push("");
       renderInspector();
     });
@@ -608,6 +635,7 @@ function wireInspectorEvents(node) {
 
   panel.querySelectorAll("[data-check-add]").forEach(function (el) {
     el.addEventListener("click", function () {
+      if (!Array.isArray(node.acceptance)) node.acceptance = [];
       node.acceptance.push({ description: "", command: "", expect: { exitCode: 0 } });
       renderInspector();
       renderCanvas();
@@ -792,6 +820,100 @@ function renderWorkflowMd(wf, defaults) {
 }
 
 /* ---------------------------------------------------------------------
+ * Mermaid-Source-Panel (live, Quelltext -- keine gerenderte Grafik)
+ * ------------------------------------------------------------------- */
+
+function refreshMermaidPanel() {
+  var panel = document.getElementById("mermaidPanel");
+  if (!panel.classList.contains("show")) return;
+  document.getElementById("mermaidPanelText").textContent = workflow ? renderMermaid(workflow) : "";
+}
+
+function toggleMermaidPanel() {
+  var panel = document.getElementById("mermaidPanel");
+  if (panel.classList.contains("show")) {
+    panel.classList.remove("show");
+  } else {
+    panel.classList.add("show");
+    refreshMermaidPanel();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Round-Trip-/Idempotenz-Check (Komfort -- keine Engine-Aenderung)
+ * ------------------------------------------------------------------- */
+
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    var sorted = {};
+    Object.keys(value).sort().forEach(function (k) { sorted[k] = sortKeysDeep(value[k]); });
+    return sorted;
+  }
+  return value;
+}
+
+function checkRoundtrip() {
+  if (!workflow) { alert("Kein Workflow geladen."); return; }
+  var panel = document.getElementById("validatePanel");
+  panel.classList.add("show");
+
+  var reserialized;
+  try {
+    reserialized = JSON.parse(JSON.stringify(workflow));
+  } catch (e) {
+    panel.classList.remove("ok");
+    panel.classList.add("bad");
+    panel.innerHTML = "<strong>Roundtrip-Fehler:</strong> Workflow-Objekt nicht JSON-serialisierbar (" + escapeHtml(e.message) + ").";
+    return;
+  }
+  var selfIdempotent = JSON.stringify(workflow) === JSON.stringify(reserialized);
+
+  var lines = [];
+  lines.push(selfIdempotent
+    ? '<span class="ok-msg">Selbst-Idempotenz: OK (JSON.parse(JSON.stringify(workflow)) ist identisch).</span>'
+    : '<span style="color:var(--err)">Selbst-Idempotenz: FEHLER -- Re-Serialisierung unterscheidet sich.</span>');
+
+  var inputMatch = null;
+  if (originalRawText != null) {
+    var originalObj = null;
+    try {
+      originalObj = JSON.parse(originalRawText);
+    } catch (e) {
+      originalObj = null;
+    }
+    if (originalObj == null) {
+      lines.push("Original-Rohtext konnte nicht erneut geparst werden -- Input-Vergleich uebersprungen.");
+    } else {
+      var sortedOriginal = JSON.stringify(sortKeysDeep(originalObj));
+      var sortedCurrent = JSON.stringify(sortKeysDeep(reserialized));
+      inputMatch = sortedOriginal === sortedCurrent;
+      if (inputMatch) {
+        lines.push('<span class="ok-msg">Export == Input: OK (key-order-unabhaengig identisch).</span>');
+      } else {
+        var addedKeys = Object.keys(reserialized).filter(function (k) {
+          return !Object.prototype.hasOwnProperty.call(originalObj, k);
+        });
+        var msg = "Export != Input.";
+        if (addedKeys.length) {
+          msg += " Neue Top-Level-Keys: " + addedKeys.join(", ") + ".";
+        } else {
+          msg += " (Unterschied liegt tiefer als Top-Level -- Werte oder Arrays unterscheiden sich.)";
+        }
+        lines.push('<span style="color:var(--err)">' + escapeHtml(msg) + '</span>');
+      }
+    }
+  } else {
+    lines.push("Keine Original-Rohtext-Quelle vorhanden -- Input-Vergleich uebersprungen.");
+  }
+
+  var overallOk = selfIdempotent && inputMatch !== false;
+  panel.classList.remove(overallOk ? "bad" : "ok");
+  panel.classList.add(overallOk ? "ok" : "bad");
+  panel.innerHTML = lines.join("<br>");
+}
+
+/* ---------------------------------------------------------------------
  * Export (download im Browser)
  * ------------------------------------------------------------------- */
 
@@ -867,10 +989,23 @@ document.getElementById("btnValidate").addEventListener("click", function () {
   showValidatePanel(validateWorkflow(workflow));
 });
 
+document.getElementById("btnRoundtrip").addEventListener("click", checkRoundtrip);
+
 document.getElementById("btnExportJson").addEventListener("click", exportJson);
 document.getElementById("btnExportMd").addEventListener("click", exportWorkflowMd);
 document.getElementById("btnRun").addEventListener("click", showRunDialog);
 document.getElementById("btnPreview").addEventListener("click", showPreviewDialog);
+
+document.getElementById("btnMermaid").addEventListener("click", toggleMermaidPanel);
+document.getElementById("btnCloseMermaidPanel").addEventListener("click", function () {
+  document.getElementById("mermaidPanel").classList.remove("show");
+});
+document.getElementById("btnCopyMermaid").addEventListener("click", function () {
+  var text = document.getElementById("mermaidPanelText").textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text);
+  }
+});
 
 document.getElementById("btnCloseRunDialog").addEventListener("click", function () {
   document.getElementById("runDialog").classList.remove("show");
