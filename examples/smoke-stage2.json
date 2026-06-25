@@ -1,0 +1,30 @@
+{
+  "version": "1",
+  "name": "Stage-2 Smoke-Test",
+  "description": "Minimaler 1-Knoten-Workflow fuer den ersten Stufe-2-Lauf auf Hetzner. Der Agent soll eine Datei erstellen; die Gate-Pruefung verifiziert den Inhalt im worktree.",
+  "defaults": {
+    "model": "sonnet",
+    "kind": "agent"
+  },
+  "nodes": [
+    {
+      "id": "smoke-hello",
+      "title": "Hello from Sandbox",
+      "goal": "Erstelle eine Datei 'hello.txt' im aktuellen Verzeichnis mit dem Inhalt 'hello from stage-2'. Keine weiteren Aenderungen.",
+      "inputs": [],
+      "constraints": [
+        "Nur die Datei hello.txt anlegen, nichts anderes aendern"
+      ],
+      "acceptance": [
+        {
+          "description": "hello.txt existiert mit erwartetem Inhalt",
+          "command": "grep 'hello from stage-2' hello.txt",
+          "expect": { "exitCode": 0 }
+        }
+      ],
+      "comments": "Trivialer Smoke-Test: prueft Container-Start, Claude-CLI-Verfuegbarkeit und worktree-Gate-Flow.",
+      "model": "sonnet",
+      "kind": "agent"
+    }
+  ]
+}
