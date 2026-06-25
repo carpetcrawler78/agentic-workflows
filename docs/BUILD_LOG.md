@@ -140,19 +140,34 @@ Vorbefund: 17/58 Tests rot (WSL-Bash-Stub). Behoben als Pre-Phase-Commit vor Pha
 - **Bash-Fix Pre-Phase**: `shutil.which("bash")` lieferte auf Windows den WSL-System32-Stub statt
   Git Bash. Fix: `_find_bash()` mit expliziten Kandidaten und `bash -lc "true"` Probe.
 
-## Aktueller Stand (2026-06-25)
+## Aktueller Stand (2026-06-25, Abend) -- HANDOFF fuer naechste Session
 
-- **Stufe-2-Backend vollstaendig** (Code-seitig), 7 Commits, 120 Tests gruen.
-- **Offen (Thomas' Schritte):** Docker-Image bauen auf Hetzner (Schritt 4 im Runbook),
-  Smoke-Lauf (Schritt 5), dann ersten echten Workflow-Knoten per `--sandbox` ausfuehren.
+- **Stufe-2-Backend vollstaendig** (Code-seitig), 7 Phasen-Commits.
+- **Teil 0 nachgezogen (Commit `c06c387`):** API-Key-Passthrough -- `run_in_sandbox` bekam
+  `env_passthrough` (Default `["ANTHROPIC_API_KEY"]`), reicht `-e ANTHROPIC_API_KEY` (ohne Wert)
+  in den Container. War ein BLOCKER: vorher hatte der Agent-Container keinen Key -> der Smoke
+  waere garantiert an Auth gescheitert. Runbook + IMAGE.md korrigiert.
+- **Tests: 127 gruen auf Windows (maßgeblich).** ACHTUNG: die bash-Sandbox liest den
+  Windows-Mount truncated/stale (Memory `sandbox-repo-verify-unreliable`) -- Sandbox-pytest-Zahlen
+  NICHT vertrauen, nur Thomas' lokalem Lauf / Claude Code.
+- **Commits lokal, noch NICHT gepusht.**
 - **Stage 3 (OpenClaw):** Spec vorhanden, Implementierung deferred.
 
-## Naechste Schritte
+## Naechste Schritte (Reihenfolge)
 
-1. **Hetzner-Lauf:** `docs/STAGE2_RUNBOOK.md` Schritt fuer Schritt (Thomas per SSH).
-2. **Image pinnen:** Nach erstem Build `docs/IMAGE.md` mit tatsaechlicher CLI-Version aktualisieren.
-3. **Kleinkram (niedrige Prio):** tomllib-Fallback (`package-project`-Check braucht Python >= 3.11),
-   README-Status aktualisieren.
+1. **Push:** `git push origin main` (lokal ahead).
+2. **Hetzner-Smoke:** `docs/STAGE2_RUNBOOK.md` Schritt fuer Schritt per SSH (capstone2,
+   cap@<server>): prune -> reboot -> pull -> `docker build` -> `python -m src.cli run
+   examples/smoke-stage2.json --sandbox --image aw-sandbox:dev --memory 1.5g`. Box: 4 Cores,
+   7,6 GiB RAM, 19 GB Disk frei, KEINE GPU.
+3. **Review-Fixes Teil A/B/C** (`docs/CC_PROMPT_stage2_review_fixes.md`; Teil 0 erledigt):
+   A = Kosten-Instrumentierung (`--output-format json` -> `total_cost_usd` ins Run-Summary),
+   B = `merge_back` braucht `git merge --abort` bei Konflikt (sonst vergiftet er Folge-Knoten),
+   C = `create_worktree` im Wellen-Modus serialisieren (Race auf `.git/index.lock`).
+4. **Image pinnen:** nach erstem Build `docs/IMAGE.md` mit echter CLI-Version (2.1.191).
+5. **Doku-only / offene Design-Entscheidungen:** Gate laeuft auf Host statt im Container
+   (Repro-Luecke); Planner-Knoten ungated (acceptance-Platzhalter `true`); `idle_timeout` ist
+   nur Wall-Fallback. tomllib-Fallback (Python >= 3.11).
 
 ## Verwandte Dateien
 
