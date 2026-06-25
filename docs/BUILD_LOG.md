@@ -3,7 +3,7 @@
 Human-readbares Protokoll: was gebaut wurde, in welcher Reihenfolge, mit welchem Ergebnis,
 und nach welcher Methode. Ergänzt `PROJECT_OVERVIEW.md` (Scope/Warum) um die **Chronik**.
 
-Letzte Aktualisierung: 2026-06-22
+Letzte Aktualisierung: 2026-06-22 (UI-Polish)
 
 ## Arbeitsmethode (wie hier gebaut wird)
 
@@ -66,6 +66,14 @@ Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` geb
     `_DEFAULT_SHELL = ["bash", "-lc"]`, Pfadauflösung via `shutil.which` gegen den
     WSL-Relay-Stub in System32). `shell`-Parameter additiv an `run_check`/`run_node`,
     `FileNotFoundError` → `CheckResult(passed=False, exit_code=None)` statt Crash. +4 Tests.
+13. **ui-polish** (`CC_PROMPT_ui_polish.md`) — `ui/canvas.html`: (a) Live-Mermaid-Source-Panel
+    (`#btnMermaid`/`#mermaidPanel`, `refreshMermaidPanel()` an beiden `renderCanvas`-Exits,
+    no-op wenn geschlossen; kein CDN). (b) Round-Trip-Härtung: die mutierenden Zeilen
+    `workflow.defaults = {}` / `workflow.edges = []` aus `loadWorkflow` raus, Inspector legt
+    `inputs/constraints/acceptance` nur noch lazy beim ersten "+"-Klick an. `#btnRoundtrip` /
+    `checkRoundtrip()` prüft Idempotenz + Export-vs-Input-Diff (gemerkter `originalRawText`,
+    in-memory). Nicht angezeigte Felder (`cwd`, `timeoutSeconds`, Kanten-`label`, top-level
+    `version/description/defaults`) überleben den Round-Trip. Engine + Tests unangetastet.
 
 ## Aktueller Stand (2026-06-22)
 
@@ -81,6 +89,9 @@ Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` geb
   (`src/loader.py` bleibt Source of Truth); Export `workflow.json` + `WORKFLOW.md` im Browser,
   byte-identisch gegen `src/export.py` verifiziert. „Run mit Gate" gibt nur den CLI-Befehl aus.
   Gebaut über `CC_PROMPT_ui_canvas.md`.
+- **UI-Polish (2026-06-22):** Live-Mermaid-Source-Panel (Quelltext, kein CDN — Zero-Deps bleibt)
+  + Round-Trip-Härtung (Laden→Export ist jetzt idempotent, keine ungefragt hinzugefügten
+  Felder mehr). Round-Trip-Selbstcheck via `#btnRoundtrip`. Siehe Chronik-Knoten 13.
 
 ## Zwei Ausführungsmodi (Stufe 1 vs. Stufe 2 — beide existieren in der Engine)
 
@@ -106,12 +117,16 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 
 ## Nächste Schritte
 
-1. **UI-Polish** (`ui/canvas.html` steht): Feinschliff, ggf. Live-Mermaid-Preview, Round-Trip-
-   Härtung.
-2. Weitere meta-workflow-Knoten bzw. neue Workflows (z.B. ein nicht-Dev-Workflow als Beweis
-   der Allgemeinheit — Idee "Steuer-/Dokumenten-Sammler" wurde diskutiert, noch nicht gebaut).
-3. **tomllib-Fallback** (`package-project`-Check braucht Python ≥ 3.11) und README-Status
-   von "Konzeptphase" auf den realen Stand bringen — beides niedrige Prio.
+1. **Stufe 2 — Sandbox-Backend bauen (großer Brocken).** Backend-Entscheidung getroffen
+   (2026-06-25, `DECISION_backend.md`): sandcastle nicht portieren, die ~3 Primitive
+   (git-worktree + docker-sandbox + merge-back + strukturierter Output) in Python nachbauen
+   (Fallback OpenHands); Master-Scheduler mit Gating obendrauf; Worker = Sonnet/API (Hetzner
+   ohne GPU); sequenziell zuerst, später max. 2-3 Slaves mit `--memory`-Limit. OpenClaw raus
+   als Backend, höchstens optionaler Stufe-3-Trigger/Notification-Layer. Bau-Auftrag:
+   `docs/CC_PROMPT_stage2_executor_backend.md`.
+2. **Kleinkram (niedrige Prio):** uncommitted UI-Polish einchecken, **tomllib-Fallback**
+   (`package-project`-Check braucht Python ≥ 3.11), README-Status von "Konzeptphase" auf den
+   realen Stand, nicht-Dev-Workflow als Allgemeinheits-Beweis.
 
 ## Verwandte Dateien
 
@@ -119,6 +134,7 @@ die Engine kann beides, die UI bietet es als Umschalter an.
 |---|---|
 | `README.md` | Pitch, Datenmodell, acceptance-Erklärung, Minimalbeispiel |
 | `docs/PROJECT_OVERVIEW.md` | Scope, Warum, Reifestufen, Kosten-Routing, Backend-Kandidaten |
+| `docs/DECISION_backend.md` | Backend-Entscheidung Stufe 2 (Matrix, kein Port, Worker=API, Hetzner-Kapazität, OpenClaw=Stufe-3-Trigger) |
 | `docs/concept.md` | Gesamtkonzept (vom `docs-concept`-Knoten erzeugt) |
 | `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Quelle der Build-Historie) |
 | `schema/workflow.schema.json` | Datenmodell (Source of Truth) |

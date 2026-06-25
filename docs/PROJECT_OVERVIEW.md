@@ -1,6 +1,7 @@
 # agentic-workflows — Projekt-Übersicht (Scope, Warum, Stand)
 
-Stand: 2026-06-21 (Engine komplett + UI gebaut; Chronik in `BUILD_LOG.md`)
+Stand: 2026-06-25 (Engine + UI komplett; Backend-Entscheidung für Stufe 2 getroffen,
+siehe `DECISION_backend.md`; Chronik in `BUILD_LOG.md`)
 
 Diese Datei fasst zusammen, **was** das Projekt ist, **warum** es existiert und **was bisher
 erarbeitet** wurde. Sie ist der Einstiegspunkt; Details stehen in den verlinkten Dateien.
@@ -90,7 +91,11 @@ Zwei Kandidaten, Entscheidung steht aus:
    (kleiner Node = ein Check, großer Node = mehrere).
 2. **Execution-Modell** — Stufe 1 vs. Stufe 2 (siehe oben). Reifefrage, kein Entweder-oder.
 3. **Persistenz** — Workflow-JSON im Repo (git-versioniert, PR-fähig) vs. nur im Cowork-Artifact.
-4. **Backend** — sandcastle vs. OpenClaw für Stufe 2.
+4. **Backend** — ENTSCHIEDEN (2026-06-25, `DECISION_backend.md`): sandcastle nicht portieren,
+   die ~3 Primitive (git-worktree, docker-sandbox, merge-back + strukturierter Output) in
+   Python nachbauen (Fallback OpenHands). OpenClaw raus als Backend (Architektur-Mismatch),
+   höchstens optionaler Trigger/Notification-Layer in Stufe 3. Worker = Sonnet/API (Hetzner
+   ohne GPU), Ausführung sequenziell zuerst, später max. 2-3 Slaves mit `--memory`-Limit.
 
 ## Code-Konventionen
 
@@ -126,10 +131,15 @@ Vollständige Bau-Historie inkl. bekannter Umgebungs-Probleme (cmd.exe-vs-bash b
 
 ## Nächster Schritt
 
-1. **Executor-Shell-Fix** (`bash -lc`), damit "Run mit Gate" plattformrobust wird (Windows
-   nutzt sonst cmd.exe; bash-Stil-Checks fallen durch — siehe `BUILD_LOG.md`).
-2. **UI-Polish / weitere Workflows** — `ui/canvas.html` steht; offen sind Feinschliff und ein
-   nicht-Dev-Workflow als Allgemeinheits-Beweis.
+Executor-Shell-Fix und UI-Polish sind erledigt (2026-06-22). Der nächste große Brocken ist
+**Stufe 2 — der autonome Sandbox-Backend-Build**:
+
+1. **Stufe-2-Backend bauen** — Python-Primitive für isolierte Slaves (git-worktree +
+   docker-sandbox + merge-back + strukturierter Output) plus Master-Scheduler mit Gating.
+   Sequenziell zuerst. Auftrag: `docs/CC_PROMPT_stage2_executor_backend.md`,
+   Begründung/Constraints: `docs/DECISION_backend.md`.
+2. **Kleinkram** — uncommitted UI-Polish einchecken, `tomllib`-Fallback (Python < 3.11),
+   README von „Konzeptphase" auf realen Stand, nicht-Dev-Workflow als Allgemeinheits-Beweis.
 
 ## Dateien
 
@@ -145,3 +155,5 @@ Vollständige Bau-Historie inkl. bekannter Umgebungs-Probleme (cmd.exe-vs-bash b
 | `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Build-Historie) |
 | `docs/notes_2026-05-31_execution-und-kosten.md` | Execution-Stufen, Kosten-Routing, OpenClaw |
 | `docs/sandcastle-master-slave-analysis.md` | sandcastle als Stufe-2-Backend, Master/Slave |
+| `docs/DECISION_backend.md` | Backend-Entscheidung Stufe 2 (Optionen-Matrix, kein Port, Worker=API, Hetzner-Kapazität, OpenClaw als Stufe-3-Trigger) |
+| `docs/CC_PROMPT_stage2_executor_backend.md` | Bau-Auftrag für den Stufe-2-Sandbox-Backend |

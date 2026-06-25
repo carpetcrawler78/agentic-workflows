@@ -8,13 +8,18 @@ Workflow als DAG zeichnen → pro Node strukturierte Slots (Ziel, Inputs, Constr
 
 ## Status
 
-Konzeptphase. Datenmodell, Export-Targets und UI-Mockup stehen, Implementierung folgt.
+Stufe 1 funktionsfähig (Stand 2026-06-25). Engine komplett und getestet (loader → export →
+runner → executor → orchestrator → cli, 58 Tests grün), Beispiel-Workflow läuft end-to-end
+durchs acceptance-Gate. UI gebaut (`ui/canvas.html`, Single-File, Zero-Deps). Dogfooding live
+über `meta-workflow.json`. Stufe 2 (autonomer Master-Agent mit Sandbox-Backend) ist
+entschieden und ausstehend — siehe `docs/PROJECT_OVERVIEW.md` und `docs/DECISION_backend.md`.
 
 ## Offene Designfragen
 
 1. **Granularität pro Node** — ein Node = ein Slash-Command (klein, viele Nodes) vs. ein Node = ein ganzer Sub-Agent (groß, wenige Nodes).
-2. **Execution-Modell** — Canvas als reines Design-Tool (User klickt Nodes manuell ab) vs. Master-Agent liest Graph und arbeitet ihn ab.
+2. **Execution-Modell** — Stufe 1 (Canvas als Design-Tool, Mensch orchestriert) vs. Stufe 2 (Master-Agent liest Graph und arbeitet ihn ab). Reifestufen, kein Entweder-oder; beide existieren in der Engine.
 3. **Persistenz** — Workflow-JSON im Repo (git-versioniert, PR-fähig) vs. nur im Cowork-Artifact.
+4. **Backend für Stufe 2** — entschieden (`docs/DECISION_backend.md`): Python-Primitive nachbauen statt sandcastle portieren; Worker = API-Modell; OpenClaw nur als optionaler Stufe-3-Trigger.
 
 ## Datenmodell
 
