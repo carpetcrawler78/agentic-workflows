@@ -51,9 +51,9 @@ docker run --rm \
 ```
 
 `run_in_sandbox()` baut dieses Kommando deterministisch aus den uebergebenen
-Parametern. Die `-e ANTHROPIC_API_KEY`-Uebergabe erfolgt dabei als optionaler
-`env`-Parameter (aktuell noch nicht verdrahtet; fuer den ersten Hetzner-Lauf
-als `extra_args` an `run_in_sandbox` oder als Env-Variable auf der Box).
+Parametern. Die `-e ANTHROPIC_API_KEY`-Uebergabe erfolgt via
+`env_passthrough=["ANTHROPIC_API_KEY"]` -- Docker liest den Wert aus der
+Umgebung des Aufrufers. Der Key erscheint so nie in der Kommandozeile / Prozessliste.
 
 ## Key-Handling (Sicherheit)
 

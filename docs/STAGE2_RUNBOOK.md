@@ -95,7 +95,7 @@ python -m src.cli run examples/smoke-stage2.json \
 
 1. Engine liest `examples/smoke-stage2.json`.
 2. Fuer Knoten `smoke-hello` wird ein git-worktree unter `.aw-worktrees/smoke-hello/` angelegt.
-3. Container startet: `docker run --rm --memory 1.5g --network bridge -v .aw-worktrees/smoke-hello/:/work aw-sandbox:dev`.
+3. Container startet: `docker run --rm --memory 1.5g --network bridge -e ANTHROPIC_API_KEY -v .aw-worktrees/smoke-hello/:/work aw-sandbox:dev`.
 4. Claude CLI im Container bekommt den Goal-Prompt: "Erstelle eine Datei 'hello.txt' ...".
 5. Nach Abschluss: Gate prueft `grep 'hello from stage-2' hello.txt` im worktree-Pfad.
 6. Bei gruenem Gate: `git merge --no-ff agent/smoke-hello` in den main-Branch.
@@ -148,7 +148,9 @@ git worktree remove .aw-worktrees/smoke-hello --force
 ### API-Key nicht gesetzt
 
 Fehlermeldung des Containers: `ANTHROPIC_API_KEY not set` oder `Authentication error`.  
-Loesung: Key als `-e`-Flag uebergeben (wird vom `run_in_sandbox` intern gesetzt, wenn ANTHROPIC_API_KEY im Environment steht).
+Loesung: Key in der Aufrufer-Umgebung setzen (`export ANTHROPIC_API_KEY=...`).
+`run_in_sandbox` reicht ihn per `-e ANTHROPIC_API_KEY` (ohne Wert) an Docker weiter --
+Docker liest den Wert dann aus dem Environment des aufrufenden Prozesses.
 
 ### Merge-Konflikt
 

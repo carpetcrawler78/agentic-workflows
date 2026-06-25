@@ -168,3 +168,50 @@ def test_image_and_memory_passed_to_sandbox(monkeypatch):
     agent(_node(), "prompt")
     assert calls[0]["image"] == "aw-sandbox:dev"
     assert calls[0]["memory_limit"] == "2g"
+
+
+# ---------------------------------------------------------------------------
+# env_passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_default_env_passthrough_is_anthropic_api_key(monkeypatch):
+    """Ohne env_passthrough-Argument: run_in_sandbox bekommt ['ANTHROPIC_API_KEY']."""
+    calls = []
+
+    def fake_run_in_sandbox(wt, command, *, env_passthrough, **kwargs):
+        calls.append(env_passthrough)
+        return _ok_sandbox()
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g")
+    agent(_node(), "prompt")
+    assert calls[0] == ["ANTHROPIC_API_KEY"]
+
+
+def test_custom_env_passthrough_forwarded(monkeypatch):
+    """Explizites env_passthrough wird unveraendert durchgereicht."""
+    calls = []
+
+    def fake_run_in_sandbox(wt, command, *, env_passthrough, **kwargs):
+        calls.append(env_passthrough)
+        return _ok_sandbox()
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g", env_passthrough=["MY_VAR"])
+    agent(_node(), "prompt")
+    assert calls[0] == ["MY_VAR"]
+
+
+def test_empty_env_passthrough_forwarded(monkeypatch):
+    """env_passthrough=[] (explizit leer) wird nicht durch den Default ersetzt."""
+    calls = []
+
+    def fake_run_in_sandbox(wt, command, *, env_passthrough, **kwargs):
+        calls.append(env_passthrough)
+        return _ok_sandbox()
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g", env_passthrough=[])
+    agent(_node(), "prompt")
+    assert calls[0] == []

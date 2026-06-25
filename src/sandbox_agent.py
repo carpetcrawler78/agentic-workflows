@@ -31,6 +31,7 @@ def make_sandbox_agent(
     model_router=None,
     extra_args=None,
     max_budget_usd=None,
+    env_passthrough=None,
     runner=subprocess.run,
 ):
     """Factory: Agent-Callable fuer isolierte docker-Container-Laeufe.
@@ -42,8 +43,11 @@ def make_sandbox_agent(
 
     Optionale Parameter:
     - max_budget_usd: --max-budget-usd pro Knoten (nur mit --print, Default aus).
-    - extra_args: werden ans CLI-Kommando angehaengt."""
+    - extra_args: werden ans CLI-Kommando angehaengt.
+    - env_passthrough: Env-Var-Namen, die per '-e NAME' an Docker weitergegeben werden.
+      Default None -> ["ANTHROPIC_API_KEY"]."""
     extra_args = list(extra_args or [])
+    _env_passthrough = env_passthrough if env_passthrough is not None else ["ANTHROPIC_API_KEY"]
 
     def agent(node, prompt):
         worktree = node.get("_worktree")
@@ -74,6 +78,7 @@ def make_sandbox_agent(
             command,
             image=image,
             memory_limit=memory_limit,
+            env_passthrough=_env_passthrough,
             runner=runner,
         )
         if result.exit_code != 0:

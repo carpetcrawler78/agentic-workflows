@@ -72,12 +72,15 @@ def run_in_sandbox(
     idle_timeout=None,
     wall_timeout=None,
     network="bridge",
+    env_passthrough=None,
     runner=subprocess.run,
 ):
     """Startet docker-Container mit gemounteten worktree und fuehrt command aus.
 
     --memory <memory_limit> ist IMMER gesetzt (Hetzner-Constraint).
     network="bridge" erlaubt egress zur Anthropic-API.
+    env_passthrough: Liste von Env-Var-Namen -- Docker liest Werte aus der
+    Aufrufer-Umgebung ("-e NAME" ohne Wert, Key taucht nie in argv auf).
     Gibt SandboxResult zurueck; bei Timeout timed_out=True, exit_code=None."""
     _require("docker")
     cmd = [
@@ -86,9 +89,10 @@ def run_in_sandbox(
         "--network", network,
         "-v", f"{worktree.path}:/work",
         "-w", "/work",
-        image,
-        "bash", "-lc", command,
     ]
+    for name in (env_passthrough or []):
+        cmd += ["-e", name]
+    cmd += [image, "bash", "-lc", command]
     timeout = wall_timeout or idle_timeout
     try:
         result = runner(cmd, capture_output=True, text=True, timeout=timeout)

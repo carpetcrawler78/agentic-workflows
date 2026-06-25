@@ -224,6 +224,75 @@ def test_run_in_sandbox_missing_docker_raises(monkeypatch):
         run_in_sandbox(_fake_worktree(), "true", image="img", memory_limit="1g")
 
 
+def test_run_in_sandbox_env_passthrough_flag_present(monkeypatch):
+    """env_passthrough=["ANTHROPIC_API_KEY"] -> '-e ANTHROPIC_API_KEY' im Befehl."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(cmd)
+        return _ok()
+
+    run_in_sandbox(
+        _fake_worktree(), "true", image="img", memory_limit="1g",
+        env_passthrough=["ANTHROPIC_API_KEY"], runner=fake_runner,
+    )
+    cmd = captured[0]
+    assert "-e" in cmd
+    idx = cmd.index("-e")
+    assert cmd[idx + 1] == "ANTHROPIC_API_KEY"
+
+
+def test_run_in_sandbox_env_passthrough_no_value_in_cmd(monkeypatch):
+    """Der Wert des Keys darf NIE in argv erscheinen -- nur der Name."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(cmd)
+        return _ok()
+
+    run_in_sandbox(
+        _fake_worktree(), "true", image="img", memory_limit="1g",
+        env_passthrough=["ANTHROPIC_API_KEY"], runner=fake_runner,
+    )
+    cmd = captured[0]
+    assert not any("=" in token and "ANTHROPIC_API_KEY" in token for token in cmd)
+
+
+def test_run_in_sandbox_no_env_passthrough_no_e_flag(monkeypatch):
+    """Ohne env_passthrough enthaelt der Befehl kein '-e'-Flag."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(cmd)
+        return _ok()
+
+    run_in_sandbox(_fake_worktree(), "true", image="img", memory_limit="1g", runner=fake_runner)
+    assert "-e" not in captured[0]
+
+
+def test_run_in_sandbox_env_passthrough_multiple(monkeypatch):
+    """Mehrere Namen erzeugen je ein '-e NAME'-Paar."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(cmd)
+        return _ok()
+
+    run_in_sandbox(
+        _fake_worktree(), "true", image="img", memory_limit="1g",
+        env_passthrough=["FOO", "BAR"], runner=fake_runner,
+    )
+    cmd = captured[0]
+    e_indices = [i for i, t in enumerate(cmd) if t == "-e"]
+    assert len(e_indices) == 2
+    assert cmd[e_indices[0] + 1] == "FOO"
+    assert cmd[e_indices[1] + 1] == "BAR"
+
+
 # ---------------------------------------------------------------------------
 # merge_back
 # ---------------------------------------------------------------------------
