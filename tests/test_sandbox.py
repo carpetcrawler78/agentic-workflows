@@ -479,3 +479,44 @@ def test_create_worktree_branch_deleted_before_add(monkeypatch, tmp_path):
 
     create_worktree(str(tmp_path), "node3", runner=fake_runner)
     assert sequence.index("branch-D") < sequence.index("worktree-add")
+
+
+# ---------------------------------------------------------------------------
+# merge_back -- abort bei Konflikt (Fix B)
+# ---------------------------------------------------------------------------
+
+
+def test_merge_back_abort_called_on_conflict(monkeypatch, tmp_path):
+    """Merge schlaegt fehl (CONFLICT) -> merge --abort wird aufgerufen."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        if "--abort" in cmd:
+            return _ok()
+        return _ok(
+            stdout="CONFLICT (content): Merge conflict in foo.py\nAutomatic merge failed.",
+            returncode=1,
+        )
+
+    result = merge_back(str(tmp_path), "agent/n1", "main", runner=fake_runner)
+    assert result.conflict is True
+    assert result.merged is False
+    abort_calls = [c for c in captured if "--abort" in c]
+    assert len(abort_calls) == 1
+
+
+def test_merge_back_no_abort_on_success(monkeypatch, tmp_path):
+    """Erfolgreicher Merge -> kein merge --abort."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        return _ok(stdout="Merge made by the 'ort' strategy.")
+
+    result = merge_back(str(tmp_path), "agent/n1", "main", runner=fake_runner)
+    assert result.merged is True
+    abort_calls = [c for c in captured if "--abort" in c]
+    assert abort_calls == []

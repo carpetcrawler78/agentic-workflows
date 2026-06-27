@@ -29,6 +29,7 @@ class SandboxResult:
     stdout: str
     stderr: str
     timed_out: bool
+    cost_usd: float | None = None
 
 
 @dataclass
@@ -132,6 +133,13 @@ def merge_back(repo_root, branch, base, *, runner=subprocess.run):
         text=True,
     )
     conflict = result.returncode != 0 and "CONFLICT" in result.stdout
+    if result.returncode != 0:
+        # Repo nicht im halb-gemergten Zustand zuruecklassen -- sonst vergiftet
+        # der naechste Knoten. --abort schlaegt fehl wenn kein Merge aktiv ist: tolerieren.
+        runner(
+            ["git", "-C", str(repo_root), "merge", "--abort"],
+            capture_output=True, text=True,
+        )
     return MergeResult(
         merged=result.returncode == 0,
         conflict=conflict,

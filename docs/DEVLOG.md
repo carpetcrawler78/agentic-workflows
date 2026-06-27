@@ -108,3 +108,46 @@ Format: DONE / MISTAKE / RULE je Eintrag.
 - **worktree-Erzeugung idempotent: alten Branch wegraeumen**: Vor `git worktree add -b`
   stets Cleanup-Sequenz (remove --force, prune, branch -D) laufen lassen und Fehler
   tolerieren. Verhindert Vergiftung von Folgelaeufen nach Abbruch.
+
+---
+
+## 2026-06-27 -- Restarbeiten Stufe 2 (Fix A/B/C/D)
+
+### DONE
+
+- **Fix B**: `merge_back` bricht fehlgeschlagenen Merge sauber ab (`git merge --abort`).
+  Repo bleibt nicht im halb-gemergten Zustand -- der naechste Knoten findet sauberen Index.
+
+- **Fix C**: `create_worktree`-Aufrufe im Wellen-Modus ueber `threading.Lock` serialisiert.
+  `git worktree add` laeuft nie gleichzeitig aus mehreren Threads -> kein `.git/index.lock`-
+  Rennen. Agent-Aufruf (docker-Container) bleibt nebenlaeufig.
+
+- **Fix A**: Kosten-Instrumentierung vollstaendig: `--output-format json` an CLI,
+  `total_cost_usd` defensiv aus stdout geparst, in `NodeRun.cost_usd` gespeichert,
+  `_print_summary` gibt `Gesamtkosten: $X.XXXX` aus wenn mindestens ein Knoten meldet.
+  Backward-compat: Agenten die None zurueckgeben (alle bisherigen Tests) unveraendert.
+
+- **Fix D**: `docs/IMAGE.md` auf verifiziert-2026-06-27 aktualisiert, Non-root-Sektion
+  (USER node, uid 1000) ergaenzt, TODO-Checkboxen auf Stand gebracht.
+
+- 10 neue Tests, volle Suite: 140 Tests gruen (war 130).
+
+### MISTAKE
+
+- **merge_back-Test: "abort" vs "--abort" als Listenelement**: Test pruefte `"abort" in cmd`,
+  aber das cmd-Element ist `"--abort"`. Catch: sofort beim ersten Test-Run entdeckt.
+  Regel: beim Pruefen von argv-Listen immer das exakte Token (`"--abort"`) verwenden,
+  nicht einen Teilstring-Match auf die Liste.
+
+### RULE
+
+- **Merge immer abort bei Fehlschlag**: Bei `merge --no-ff` Fehlschlag sofort
+  `merge --abort` (Fehler tolerieren). Verhindert vergifteten Index fuer Folgeknoten.
+
+- **git-Operationen in Thread-Pools serialisieren**: `git worktree add/remove` und
+  `merge` nie echt parallel -- immer unter `threading.Lock`. Parallelitaet liegt
+  im Container-Lauf, nicht im git-Schritt.
+
+- **Kosten defensiv parsen**: `json.loads` + `data.get(...)` + isinstance-Check
+  in try/except. CLI kann andere Felder liefern oder JSON weglassen -- nie annehmen,
+  dass das Feld da ist.

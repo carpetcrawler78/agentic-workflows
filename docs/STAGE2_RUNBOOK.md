@@ -164,8 +164,24 @@ git merge --abort
 
 ---
 
+## Ausgabe-Format (verifiziert 2026-06-27)
+
+Der CLI-Output endet mit einer Summary-Zeile und -- sobald der Agent Kosten meldet --
+einer Kostenzeile:
+
+```
+smoke-hello: passed
+Gesamt: 1/1 Knoten bestanden, Workflow passed
+Gesamtkosten: $0.0123
+```
+
+Die Kostenzeile erscheint nur, wenn mindestens ein Knoten `total_cost_usd` aus dem
+`--output-format json`-Output der Claude CLI zurueckliefert. Ohne Kosten-Daten wird
+die Zeile weggelassen.
+
+---
+
 ## Naechste Schritte nach erfolgreichem Smoke-Test
 
-1. `docs/IMAGE.md` aktualisieren: installierte CLI-Version eintragen.
-2. Ersten echten Workflow-Knoten testen (z.B. `meta-workflow.json` Knoten 1).
-3. `--max-parallel 2` mit einem 2-Knoten-Workflow ausprobieren.
+1. Ersten echten Workflow-Knoten testen (z.B. `meta-workflow.json` Knoten 1).
+2. `--max-parallel 2` mit einem 2-Knoten-Workflow ausprobieren.

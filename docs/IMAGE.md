@@ -2,8 +2,8 @@
 
 Spezifikation des Sandbox-Image fuer Stufe-2-Agent-Knoten.
 
-**Status: Build von Thomas auszufuehren** (Docker-Daemon war auf dem Dev-Rechner
-nicht aktiv; Dockerfile ist vollstaendig und bereit zum Bauen).
+**Status: verifiziert 2026-06-27** (Smoke-Lauf 1/1 auf Hetzner capstone2 erfolgreich,
+Claude CLI Version 2.1.191, gepinnt).
 
 ## Was das Image enthaelt
 
@@ -55,6 +55,14 @@ Parametern. Die `-e ANTHROPIC_API_KEY`-Uebergabe erfolgt via
 `env_passthrough=["ANTHROPIC_API_KEY"]` -- Docker liest den Wert aus der
 Umgebung des Aufrufers. Der Key erscheint so nie in der Kommandozeile / Prozessliste.
 
+## Non-Root-Betrieb (Pflicht)
+
+Das Image laeuft als `USER node` (uid 1000). Die Claude CLI verweigert
+`--permission-mode bypassPermissions` unter root.
+
+**Voraussetzung:** der Host-User muss uid 1000 haben (pruefbar mit `id -u`),
+damit der gemountete Worktree (`-v /path:/work`) vom Container beschreibbar ist.
+
 ## Key-Handling (Sicherheit)
 
 - API-Key **niemals** ins Image backen (kein `ENV ANTHROPIC_API_KEY` im Dockerfile).
@@ -71,8 +79,9 @@ Umgebung des Aufrufers. Der Key erscheint so nie in der Kommandozeile / Prozessl
 | `--permission-mode bypassPermissions` | Keine interaktiven Prompts (Pflicht fuer headless) |
 | `--max-budget-usd <n>` | Kosten-Guard pro Knoten (optional, nur mit `--print`) |
 
-## TODO nach erstem Build
+## Status nach erstem Build (2026-06-27)
 
-- [ ] `CLAUDE_CLI_VERSION` im Build-Kommando auf tatsaechliche Version pinnen.
-- [ ] Smoke-Test-Output in BUILD_LOG.md dokumentieren.
+- [x] `CLAUDE_CLI_VERSION=2.1.191` im Build-Kommando gepinnt.
+- [x] Smoke-Test auf Hetzner capstone2 erfolgreich (1/1).
+- [x] Image laeuft non-root (USER node, uid 1000).
 - [ ] Image-Groesse pruefen (`docker image inspect aw-sandbox:dev --format '{{.Size}}'`).

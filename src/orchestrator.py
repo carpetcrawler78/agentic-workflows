@@ -6,6 +6,7 @@ Claude-Code-Aufruf testbar bleibt."""
 import argparse
 import json
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,8 +25,9 @@ except ImportError:
     from export import render_node
     from sandbox import create_worktree, merge_back, remove_worktree
 
-# (node, gerenderter_prompt) -> None. Wirft der Agent, gilt der Knoten als fehlgeschlagen.
-Agent = Callable[[dict, str], None]
+# (node, gerenderter_prompt) -> Optional[float] (Kosten in USD) oder None.
+# Wirft der Agent, gilt der Knoten als fehlgeschlagen.
+Agent = Callable[[dict, str], Optional[float]]
 
 
 @dataclass
@@ -43,6 +45,7 @@ class NodeRun:
     agent_invoked: bool
     result: Optional[NodeResult]
     passed: bool
+    cost_usd: Optional[float] = None
 
 
 @dataclass
@@ -86,22 +89,26 @@ def _write_checkpoint(checkpoint_path, passed_node_ids):
         json.dump({"passed_node_ids": passed_node_ids}, f)
 
 
-def _run_one_node_for_wave(node_id, nodes_by_id, defaults, agent, workspace):
+def _run_one_node_for_wave(node_id, nodes_by_id, defaults, agent, workspace, git_lock):
     """Per-Knoten-Logik fuer den parallelen Wellen-Modus (ohne Merge-Schritt).
 
+    git-mutierende Schritte (create/remove) laufen unter git_lock --
+    der eigentliche Agent-Aufruf bleibt nebenlaeufig.
     Gibt (node_id, result, worktree) bei Erfolg zurueck.
     Bei Agent-Fehler: (node_id, None, exc) -- worktree wird entfernt."""
     node = nodes_by_id[node_id]
     prompt = render_node(node, defaults)
-    worktree = create_worktree(workspace.repo_root, node_id)
+    with git_lock:
+        worktree = create_worktree(workspace.repo_root, node_id)
     node_ctx = {**node, "_worktree": worktree}
     try:
-        agent(node_ctx, prompt)
+        cost = agent(node_ctx, prompt)
     except Exception as exc:
-        remove_worktree(workspace.repo_root, worktree)
-        return node_id, None, exc
+        with git_lock:
+            remove_worktree(workspace.repo_root, worktree)
+        return node_id, None, exc, None
     result = run_node(node, defaults, cwd_root=worktree.path)
-    return node_id, result, worktree
+    return node_id, result, worktree, cost
 
 
 def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failure):
@@ -118,6 +125,8 @@ def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failur
 
     all_runs = []
     stopped = False
+    # Serialisiert git-mutierende Schritte (worktree add/remove, merge) ueber Threads.
+    git_lock = threading.Lock()
 
     for wave in waves:
         if stopped:
@@ -130,18 +139,18 @@ def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failur
         wave_outcomes = {}
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
             futures = {
-                executor.submit(_run_one_node_for_wave, nid, nodes_by_id, defaults, agent, workspace): nid
+                executor.submit(_run_one_node_for_wave, nid, nodes_by_id, defaults, agent, workspace, git_lock): nid
                 for nid in wave
             }
             for future, nid in futures.items():
                 try:
                     wave_outcomes[nid] = future.result()
                 except Exception as exc:
-                    wave_outcomes[nid] = (nid, None, exc)
+                    wave_outcomes[nid] = (nid, None, exc, None)
 
         # Merge in deterministischer Wellen-Reihenfolge (verhindert nicht-reproduzierbare Merge-Sequenz).
         for nid in wave:
-            _, result, worktree_or_exc = wave_outcomes[nid]
+            _, result, worktree_or_exc, cost = wave_outcomes[nid]
             if result is None:
                 err_result = _agent_error_result(nid, worktree_or_exc)
                 all_runs.append(
@@ -152,10 +161,11 @@ def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failur
             else:
                 worktree = worktree_or_exc
                 if result.passed:
-                    merge_back(workspace.repo_root, worktree.branch, "HEAD")
-                    remove_worktree(workspace.repo_root, worktree)
+                    with git_lock:
+                        merge_back(workspace.repo_root, worktree.branch, "HEAD")
+                        remove_worktree(workspace.repo_root, worktree)
                 all_runs.append(
-                    NodeRun(node_id=nid, skipped=False, agent_invoked=True, result=result, passed=result.passed)
+                    NodeRun(node_id=nid, skipped=False, agent_invoked=True, result=result, passed=result.passed, cost_usd=cost)
                 )
                 if not result.passed and stop_on_failure:
                     stopped = True
@@ -167,12 +177,12 @@ def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failur
 def _run_workspace_node(node, prompt, agent, workspace, defaults):
     """Pro-Knoten-Logik im Workspace-Modus: worktree -> agent -> gate -> merge/keep.
 
-    Gibt NodeResult zurueck. Wirft, wenn der Agent eine Exception wirft (der
-    aeussere run_workflow-Handler faengt das dann als _agent_error_result ab)."""
+    Gibt (NodeResult, Optional[float]) zurueck. Wirft, wenn der Agent wirft
+    (der aeussere run_workflow-Handler faengt das dann als _agent_error_result ab)."""
     worktree = create_worktree(workspace.repo_root, node["id"])
     node_ctx = {**node, "_worktree": worktree}
     try:
-        agent(node_ctx, prompt)
+        cost = agent(node_ctx, prompt)
     except Exception:
         remove_worktree(workspace.repo_root, worktree)
         raise
@@ -181,7 +191,7 @@ def _run_workspace_node(node, prompt, agent, workspace, defaults):
         merge_back(workspace.repo_root, worktree.branch, "HEAD")
         remove_worktree(workspace.repo_root, worktree)
     # Rotes Gate: worktree erhalten fuer Inspektion, kein merge.
-    return result
+    return result, cost
 
 
 def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1):
@@ -223,13 +233,14 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
 
         node = nodes_by_id[node_id]
         agent_invoked = False
+        cost = None
 
         if workspace is not None and agent is not None:
             # Workspace-Modus: worktree -> agent im Container -> Gate -> merge/keep.
             prompt = render_node(node, defaults)
             agent_invoked = True
             try:
-                result = _run_workspace_node(node, prompt, agent, workspace, defaults)
+                result, cost = _run_workspace_node(node, prompt, agent, workspace, defaults)
             except Exception as exc:
                 result = _agent_error_result(node_id, exc)
                 runs.append(
@@ -245,7 +256,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
                 prompt = render_node(node, defaults)
                 agent_invoked = True
                 try:
-                    agent(node, prompt)
+                    cost = agent(node, prompt)
                 except Exception as exc:
                     result = _agent_error_result(node_id, exc)
                     runs.append(
@@ -259,7 +270,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
             result = run_node(node, defaults, cwd_root)
 
         runs.append(
-            NodeRun(node_id=node_id, skipped=False, agent_invoked=agent_invoked, result=result, passed=result.passed)
+            NodeRun(node_id=node_id, skipped=False, agent_invoked=agent_invoked, result=result, passed=result.passed, cost_usd=cost)
         )
         if result.passed:
             passed_node_ids.append(node_id)
@@ -317,6 +328,9 @@ def _print_summary(workflow_run):
     passed_count = sum(1 for run in workflow_run.runs if run.passed)
     overall = "passed" if workflow_run.passed else "failed"
     print(f"Gesamt: {passed_count}/{total} Knoten bestanden, Workflow {overall}")
+    costs = [run.cost_usd for run in workflow_run.runs if run.cost_usd is not None]
+    if costs:
+        print(f"Gesamtkosten: ${sum(costs):.4f}")
 
 
 def _main():

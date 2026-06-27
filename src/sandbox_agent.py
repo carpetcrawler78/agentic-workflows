@@ -1,9 +1,11 @@
 """Isolierter Sandbox-Agent: Claude-Code-CLI im docker-Container.
 
-make_sandbox_agent() liefert ein Agent-Callable (node, prompt) -> None.
+make_sandbox_agent() liefert ein Agent-Callable (node, prompt) -> Optional[float].
+Rueckgabe: geparste total_cost_usd aus dem CLI-JSON-Output oder None.
 Der Orchestrator-Workspace-Hook injiziert node['_worktree'] vor dem Aufruf.
 """
 
+import json
 import shlex
 import subprocess
 import warnings
@@ -65,6 +67,7 @@ def make_sandbox_agent(
         parts = [
             "claude",
             "-p",
+            "--output-format", "json",
             "--model", model_alias,
             "--permission-mode", "bypassPermissions",
         ]
@@ -88,5 +91,16 @@ def make_sandbox_agent(
                 f"Agent fehlgeschlagen (exit_code={result.exit_code}): "
                 f"{result.stderr[:200]}"
             )
+
+        # Kosten defensiv aus dem CLI-JSON-Output parsen; fehlt das Feld -> None.
+        cost = None
+        try:
+            data = json.loads(result.stdout)
+            cost_raw = data.get("total_cost_usd")
+            if isinstance(cost_raw, (int, float)):
+                cost = float(cost_raw)
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass
+        return cost
 
     return agent

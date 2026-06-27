@@ -215,3 +215,55 @@ def test_empty_env_passthrough_forwarded(monkeypatch):
     agent = make_sandbox_agent(image="img", memory_limit="1g", env_passthrough=[])
     agent(_node(), "prompt")
     assert calls[0] == []
+
+
+# ---------------------------------------------------------------------------
+# Kosten-Parsing aus JSON-Output (Fix A)
+# ---------------------------------------------------------------------------
+
+
+def test_cost_parsed_from_json_stdout(monkeypatch):
+    """stdout mit total_cost_usd -> Agent gibt Float zurueck."""
+    def fake_run_in_sandbox(wt, command, **kwargs):
+        return SandboxResult(exit_code=0, stdout='{"total_cost_usd": 0.0123, "result": "ok"}', stderr="", timed_out=False)
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g")
+    cost = agent(_node(), "prompt")
+    assert cost == pytest.approx(0.0123)
+
+
+def test_cost_none_when_field_missing(monkeypatch):
+    """stdout ohne total_cost_usd -> Agent gibt None zurueck, kein Crash."""
+    def fake_run_in_sandbox(wt, command, **kwargs):
+        return SandboxResult(exit_code=0, stdout='{"result": "ok"}', stderr="", timed_out=False)
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g")
+    cost = agent(_node(), "prompt")
+    assert cost is None
+
+
+def test_cost_none_when_stdout_not_json(monkeypatch):
+    """stdout kein valides JSON -> Agent gibt None zurueck, kein Crash."""
+    def fake_run_in_sandbox(wt, command, **kwargs):
+        return SandboxResult(exit_code=0, stdout="not json at all", stderr="", timed_out=False)
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g")
+    cost = agent(_node(), "prompt")
+    assert cost is None
+
+
+def test_output_format_json_in_command(monkeypatch):
+    """--output-format json ist im generierten Kommando enthalten."""
+    captured = []
+
+    def fake_run_in_sandbox(wt, command, **kwargs):
+        captured.append(command)
+        return _ok_sandbox()
+
+    monkeypatch.setattr(sandbox_agent, "run_in_sandbox", fake_run_in_sandbox)
+    agent = make_sandbox_agent(image="img", memory_limit="1g")
+    agent(_node(), "prompt")
+    assert "--output-format json" in captured[0]

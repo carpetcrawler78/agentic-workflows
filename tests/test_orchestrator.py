@@ -367,6 +367,88 @@ def test_workspace_agent_exception_kept_no_merge(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_parallel_wave_create_worktree_serialized(monkeypatch, tmp_path):
+    """create_worktree-Aufrufe laufen nie gleichzeitig (Lock-Serialisierung, Fix C)."""
+    import threading
+
+    concurrent_count = [0]
+    max_concurrent = [0]
+    count_lock = threading.Lock()
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        with count_lock:
+            concurrent_count[0] += 1
+            if concurrent_count[0] > max_concurrent[0]:
+                max_concurrent[0] = concurrent_count[0]
+        # Kurze Pause simuliert echte git-Arbeit
+        import time
+        time.sleep(0.02)
+        with count_lock:
+            concurrent_count[0] -= 1
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", lambda *a, **kw: None)
+
+    def fake_agent(node, prompt):
+        pass
+
+    workflow = _workflow(
+        [_node("a"), _node("b"), _node("c")],
+        [{"from": "a", "to": "b"}, {"from": "a", "to": "c"}],
+    )
+    result = run_workflow(
+        workflow,
+        agent=fake_agent,
+        workspace=Workspace(repo_root=str(tmp_path)),
+        max_parallel=3,
+    )
+    assert result.passed
+    # create_worktree darf nie von >1 Thread gleichzeitig gehalten werden
+    assert max_concurrent[0] == 1
+
+
+def test_cost_propagated_from_agent_to_node_run():
+    """Agent gibt float zurueck -> NodeRun.cost_usd gesetzt (Fix A)."""
+    workflow = _workflow([_node("a")])
+
+    def costing_agent(node, prompt):
+        return 0.0042
+
+    result = run_workflow(workflow, agent=costing_agent)
+    assert result.runs[0].cost_usd == pytest.approx(0.0042)
+
+
+def test_print_summary_shows_total_cost(capsys):
+    """_print_summary druckt Gesamtkosten wenn mindestens ein Knoten Kosten gemeldet hat."""
+    from orchestrator import _print_summary, NodeRun, WorkflowRun
+    runs = [
+        NodeRun(node_id="a", skipped=False, agent_invoked=True, result=None, passed=True, cost_usd=0.01),
+        NodeRun(node_id="b", skipped=False, agent_invoked=True, result=None, passed=True, cost_usd=0.005),
+    ]
+    wf_run = WorkflowRun(order=["a", "b"], runs=runs, passed=True)
+    _print_summary(wf_run)
+    out = capsys.readouterr().out
+    assert "Gesamtkosten" in out
+    assert "0.0150" in out
+
+
+def test_print_summary_no_cost_line_when_none(capsys):
+    """Ohne Kosten-Daten erscheint keine Kostenzeile."""
+    from orchestrator import _print_summary, NodeRun, WorkflowRun
+    runs = [
+        NodeRun(node_id="a", skipped=False, agent_invoked=True, result=None, passed=True, cost_usd=None),
+    ]
+    wf_run = WorkflowRun(order=["a"], runs=runs, passed=True)
+    _print_summary(wf_run)
+    out = capsys.readouterr().out
+    assert "Gesamtkosten" not in out
+
+
 def test_make_claude_agent_builds_command(monkeypatch):
     calls = []
 
