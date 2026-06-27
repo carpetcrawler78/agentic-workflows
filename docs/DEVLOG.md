@@ -61,3 +61,50 @@ Format: DONE / MISTAKE / RULE je Eintrag.
 
 - **API-Key niemals ins Image**: ANTHROPIC_API_KEY immer als `-e`-Flag zur Laufzeit,
   nie als ARG/ENV im Dockerfile. Verletzt Commit history bleibt sauber.
+
+---
+
+## 2026-06-27 -- Hetzner-Smoke Hotfixes permanent ins Repo
+
+### DONE
+
+- Vier Hotfixes aus dem Hetzner-Klon sauber ins Repo uebertragen; alle 130 Tests gruen.
+- Smoke-Status und uid-1000-Voraussetzung in `docs/STAGE2_RUNBOOK.md` dokumentiert.
+
+### MISTAKE
+
+- **Sandbox-Importe in `cli.py` als bare Imports**: `from sandbox_agent import ...` und
+  `from orchestrator import Workspace` im `--sandbox`-Pfad standen nackt, ohne das
+  try/except-Muster wie am Dateikopf. Scheiterte mit `ModuleNotFoundError` bei
+  `python -m src.cli ... --sandbox`.
+
+- **Container als root**: `node:20-slim` startet als root. Claude CLI verweigert
+  `--permission-mode bypassPermissions` unter root ("cannot be used with root/sudo
+  privileges"). `USER node` am Dateiende des Dockerfile wurde vergessen.
+
+- **Prompt als argv uebergeben**: `claude -p '<prompt>'` scheiterte, weil
+  `render_node` YAML-Frontmatter (`---`) liefert und die CLI die fuehrenden
+  Bindestriche als Option parst. Fix: `printf %s '<prompt>' | claude -p ...`.
+
+- **`create_worktree` nicht idempotent**: abgebrochene Laeufe hinterlassen den Branch
+  `agent/<node_id>`. Folgelauf scheitert an `git worktree add -b` ("branch already
+  exists"). Cleanup-Sequenz (worktree remove --force, prune, branch -D) vor dem
+  `worktree add` eingebaut.
+
+### RULE
+
+- **Sandbox-Importe immer ueber try/except-Guard wie Dateikopf**: Relative Importe
+  (`.sandbox_agent`) zuerst, bare als Fallback. Gilt fuer alle Importe, die vom
+  Aufrufkontext (`python -m src.cli` vs. `python src/cli.py`) abhaengen.
+
+- **Agent-Container non-root betreiben**: `USER <non-root>` an Dockerfile-Ende noetig,
+  wenn die CLI `bypassPermissions` verlangt. Build-Schritte bleiben als root; nur
+  Laufzeit wechselt den User.
+
+- **Prompt via stdin, wenn Inhalt mit `-` beginnen kann**: `printf %s '<prompt>' | claude -p`
+  statt `-p '<prompt>'` als argv. Verhindert CLI-Fehlinterpretation von Frontmatter-
+  oder Optionszeichen am Prompt-Anfang.
+
+- **worktree-Erzeugung idempotent: alten Branch wegraeumen**: Vor `git worktree add -b`
+  stets Cleanup-Sequenz (remove --force, prune, branch -D) laufen lassen und Fehler
+  tolerieren. Verhindert Vergiftung von Folgelaeufen nach Abbruch.

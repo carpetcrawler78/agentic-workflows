@@ -26,3 +26,7 @@ ARG CLAUDE_CLI_VERSION
 RUN npm install -g ${CLAUDE_CLI_PACKAGE}@${CLAUDE_CLI_VERSION}
 
 WORKDIR /work
+
+# Claude CLI verweigert bypassPermissions als root -> Container non-root betreiben.
+# node-User (uid 1000) matcht typische Host-uid, damit der gemountete worktree (/work) schreibbar bleibt.
+USER node

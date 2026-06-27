@@ -56,7 +56,8 @@ def test_create_worktree_correct_git_command(monkeypatch, tmp_path):
         return _ok()
 
     create_worktree(str(tmp_path), "my-node", runner=fake_runner)
-    cmd = captured[0]
+    # Nach Fix 4 sind Cleanup-Aufrufe vorgelagert; das letzte Kommando ist worktree add.
+    cmd = captured[-1]
     assert cmd[0] == "git"
     assert cmd[1:3] == ["-C", str(tmp_path)]
     assert "worktree" in cmd
@@ -422,3 +423,59 @@ def test_parse_tagged_output_schema_valid():
     }
     result = parse_tagged_output('<out>{"name": "Alice"}</out>', "out", schema=schema)
     assert result == {"name": "Alice"}
+
+
+# ---------------------------------------------------------------------------
+# create_worktree -- Idempotenz (Fix 4)
+# ---------------------------------------------------------------------------
+
+
+def test_create_worktree_cleanup_before_add(monkeypatch, tmp_path):
+    """Cleanup-Kommandos (remove --force, prune, branch -D) kommen vor worktree add."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        return _ok()
+
+    create_worktree(str(tmp_path), "node1", runner=fake_runner)
+    verbs = [c[c.index("worktree") + 1] if "worktree" in c else (c[3] if len(c) > 3 else "") for c in captured]
+    add_idx = next(i for i, c in enumerate(captured) if "add" in c)
+    # branch -D muss vor worktree add erscheinen
+    branch_d_idx = next(i for i, c in enumerate(captured) if "-D" in c)
+    assert branch_d_idx < add_idx
+
+
+def test_create_worktree_cleanup_tolerates_failure(monkeypatch, tmp_path):
+    """Fehlschlagende Cleanup-Kommandos werden toleriert; worktree add laeuft trotzdem."""
+    _mock_which(monkeypatch)
+    call_count = [0]
+
+    def fake_runner(cmd, **kwargs):
+        call_count[0] += 1
+        # Cleanup-Aufrufe scheitern (kein worktree/Branch vorhanden) -- kein raise.
+        if "add" in cmd:
+            return _ok()
+        return _ok(stderr="nothing to remove", returncode=128)
+
+    wt = create_worktree(str(tmp_path), "node2", runner=fake_runner)
+    assert wt.branch == "agent/node2"
+    # mindestens 4 Aufrufe: remove, prune, branch -D, add
+    assert call_count[0] >= 4
+
+
+def test_create_worktree_branch_deleted_before_add(monkeypatch, tmp_path):
+    """Existierender Branch wird per branch -D geloescht, dann erst worktree add."""
+    _mock_which(monkeypatch)
+    sequence = []
+
+    def fake_runner(cmd, **kwargs):
+        if "branch" in cmd and "-D" in cmd:
+            sequence.append("branch-D")
+        elif "worktree" in cmd and "add" in cmd:
+            sequence.append("worktree-add")
+        return _ok()
+
+    create_worktree(str(tmp_path), "node3", runner=fake_runner)
+    assert sequence.index("branch-D") < sequence.index("worktree-add")

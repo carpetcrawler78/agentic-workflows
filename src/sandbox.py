@@ -46,13 +46,27 @@ def _require(tool):
 
 
 def create_worktree(repo_root, node_id, base="HEAD", *, runner=subprocess.run):
-    """Legt git-worktree auf Branch agent/<node_id> an.
+    """Legt git-worktree auf Branch agent/<node_id> an (idempotent).
 
+    Raeut vorherigen worktree + Branch gleichen Namens weg, bevor neu angelegt wird.
     Pfad: <repo_root>/.aw-worktrees/<node_id> (relativ zum repo_root).
     Gibt Worktree-Dataclass zurueck. Wirft RuntimeError bei git-Fehlschlag."""
     _require("git")
     branch = f"agent/{node_id}"
     wt_path = str(Path(repo_root) / ".aw-worktrees" / node_id)
+    # Idempotenz: alten worktree + Branch wegraeumen, Fehler tolerieren.
+    runner(
+        ["git", "-C", str(repo_root), "worktree", "remove", wt_path, "--force"],
+        capture_output=True, text=True,
+    )
+    runner(
+        ["git", "-C", str(repo_root), "worktree", "prune"],
+        capture_output=True, text=True,
+    )
+    runner(
+        ["git", "-C", str(repo_root), "branch", "-D", branch],
+        capture_output=True, text=True,
+    )
     result = runner(
         ["git", "-C", str(repo_root), "worktree", "add", "-b", branch, wt_path, base],
         capture_output=True,

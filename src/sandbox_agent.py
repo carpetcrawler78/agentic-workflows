@@ -64,14 +64,16 @@ def make_sandbox_agent(
 
         parts = [
             "claude",
-            "-p", shlex.quote(prompt),
+            "-p",
             "--model", model_alias,
             "--permission-mode", "bypassPermissions",
         ]
         if max_budget_usd is not None:
             parts += ["--max-budget-usd", str(max_budget_usd)]
         parts += extra_args
-        command = " ".join(parts)
+        # Prompt via stdin, nicht als argv: render_node liefert YAML-Frontmatter (---),
+        # das die CLI sonst als Option fehlinterpretiert.
+        command = "printf %s " + shlex.quote(prompt) + " | " + " ".join(parts)
 
         result = run_in_sandbox(
             worktree,

@@ -1,7 +1,8 @@
 # Stage-2 Runbook -- Erster Hetzner-Lauf
 
-Stand: 2026-06-25  
-Status: Schritte 1-6 sind Thomas' Live-Schritte (SSH). Engine-Code ist bereit.
+Stand: 2026-06-27  
+Status: Erster Smoke-Lauf auf capstone2 (uid 1000) erfolgreich -- nach 4 Hotfixes (2026-06-27 ins Repo uebernommen).
+Engine-Code ist bereit; Schritte 1-6 sind Thomas' Live-Schritte (SSH).
 
 ---
 
@@ -14,6 +15,7 @@ Status: Schritte 1-6 sind Thomas' Live-Schritte (SSH). Engine-Code ist bereit.
 | Python 3.11+ vorhanden | `python3 --version` |
 | anthropic/claude-code npm-Paket verfuegbar | wird im Image installiert |
 | `ANTHROPIC_API_KEY` im Environment gesetzt | `echo $ANTHROPIC_API_KEY` |
+| **Host-User hat uid 1000** | `id -u` (Container-User `node` hat uid 1000; `/work`-Mount muss schreibbar sein) |
 
 ---
 

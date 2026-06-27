@@ -40,8 +40,12 @@ def _cmd_run(args):
     workspace = None
 
     if args.sandbox:
-        from sandbox_agent import make_sandbox_agent
-        from orchestrator import Workspace
+        try:
+            from .sandbox_agent import make_sandbox_agent
+            from .orchestrator import Workspace
+        except ImportError:
+            from sandbox_agent import make_sandbox_agent
+            from orchestrator import Workspace
         agent = make_sandbox_agent(image=args.image, memory_limit=args.memory)
         workspace = Workspace(repo_root=args.cwd)
     elif args.execute:
