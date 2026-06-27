@@ -8,11 +8,20 @@ Workflow als DAG zeichnen → pro Node strukturierte Slots (Ziel, Inputs, Constr
 
 ## Status
 
-Stufe 1 funktionsfähig (Stand 2026-06-25). Engine komplett und getestet (loader → export →
-runner → executor → orchestrator → cli, 58 Tests grün), Beispiel-Workflow läuft end-to-end
-durchs acceptance-Gate. UI gebaut (`ui/canvas.html`, Single-File, Zero-Deps). Dogfooding live
-über `meta-workflow.json`. Stufe 2 (autonomer Master-Agent mit Sandbox-Backend) ist
-entschieden und ausstehend — siehe `docs/PROJECT_OVERVIEW.md` und `docs/DECISION_backend.md`.
+Stufe 1 **und** Stufe 2 funktionsfähig (Stand 2026-06-27). Engine komplett und getestet
+(loader → export → runner → executor → orchestrator → cli), Beispiel-Workflow läuft
+end-to-end durchs acceptance-Gate. UI gebaut (`ui/canvas.html`, Single-File, Zero-Deps).
+Dogfooding live über `meta-workflow.json`.
+
+Stufe 2 (Sandbox-Backend: docker + git-worktree pro Knoten) ist **end-to-end auf Hetzner
+verifiziert**: Isolation im Container, acceptance-Gate, `commit_worktree` vor `merge_back`
+(Agent-Arbeit landet via `--no-ff`-Merge in `main`), idempotentes `create_worktree` und
+Kosten-Tracking (`total_cost_usd` im Run-Summary). Aufruf: `… run <wf>.json --sandbox`.
+Details: `docs/PROJECT_OVERVIEW.md`, `docs/DECISION_backend.md`, `docs/STAGE2_RUNBOOK.md`.
+
+Erster realer Nicht-Dev-Konsument (der „Allgemeinheits-Beweis"): **job-search-system**
+(eigenes Repo). Beziehung + Cross-Reference-Konvention siehe `CLAUDE.md` →
+„Externe Konsumenten / Zwei-Repo-Beziehung".
 
 ## Offene Designfragen
 
