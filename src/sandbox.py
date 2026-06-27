@@ -162,6 +162,33 @@ def remove_worktree(repo_root, worktree, *, force_keep_on_dirty=True, runner=sub
         )
 
 
+def commit_worktree(worktree, message, *, runner=subprocess.run):
+    """Staged + committet alle Aenderungen im worktree auf dem Agent-Branch.
+
+    Gibt True zurueck wenn ein Commit gemacht wurde, False wenn nichts zu committen
+    war (Agent hat nichts veraendert). Headless-Identity explizit gesetzt, damit
+    der Commit ohne globale git-Config durchlaeuft."""
+    _require("git")
+    runner(
+        ["git", "-C", worktree.path, "add", "-A"],
+        capture_output=True, text=True,
+    )
+    # diff --cached --quiet: exit 0 = keine Aenderung, exit 1 = Aenderungen vorhanden.
+    staged = runner(
+        ["git", "-C", worktree.path, "diff", "--cached", "--quiet"],
+        capture_output=True, text=True,
+    )
+    if staged.returncode == 0:
+        return False
+    runner(
+        ["git", "-C", worktree.path,
+         "-c", "user.name=aw-agent", "-c", "user.email=aw-agent@local",
+         "commit", "-m", message],
+        capture_output=True, text=True,
+    )
+    return True
+
+
 def parse_tagged_output(stdout, tag, schema=None):
     """Extrahiert <tag>...</tag> aus stdout, parst als JSON, validiert optional.
 

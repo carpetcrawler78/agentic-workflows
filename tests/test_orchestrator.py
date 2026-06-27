@@ -179,12 +179,15 @@ def test_resume_after_abort_skips_passed_nodes(tmp_path):
 
 
 def _patch_workspace(monkeypatch, tmp_path):
-    """Ersetzt create_worktree / merge_back / remove_worktree durch Fakes.
+    """Ersetzt create_worktree / commit_worktree / merge_back / remove_worktree durch Fakes.
     Gibt merge_calls-Liste zurueck fuer Assertions."""
     merge_calls = []
 
     def fake_create_worktree(repo_root, node_id, base="HEAD", **kwargs):
         return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base=base)
+
+    def fake_commit_worktree(worktree, message, **kwargs):
+        return True
 
     def fake_merge_back(repo_root, branch, base, **kwargs):
         merge_calls.append(branch)
@@ -194,6 +197,7 @@ def _patch_workspace(monkeypatch, tmp_path):
         pass
 
     monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "commit_worktree", fake_commit_worktree)
     monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
     monkeypatch.setattr(orchestrator, "remove_worktree", fake_remove_worktree)
     return merge_calls
@@ -254,6 +258,9 @@ def test_parallel_wave_merges_in_deterministic_order(monkeypatch, tmp_path):
     def fake_create_worktree(repo_root, node_id, **kwargs):
         return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
 
+    def fake_commit_worktree(worktree, message, **kwargs):
+        return True
+
     def fake_merge_back(repo_root, branch, base, **kwargs):
         merge_calls.append(branch)
         return MergeResult(merged=True, conflict=False, stdout="", stderr="")
@@ -262,6 +269,7 @@ def test_parallel_wave_merges_in_deterministic_order(monkeypatch, tmp_path):
         pass
 
     monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "commit_worktree", fake_commit_worktree)
     monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
     monkeypatch.setattr(orchestrator, "remove_worktree", fake_remove_worktree)
 
@@ -391,6 +399,7 @@ def test_parallel_wave_create_worktree_serialized(monkeypatch, tmp_path):
         return MergeResult(merged=True, conflict=False, stdout="", stderr="")
 
     monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "commit_worktree", lambda *a, **kw: True)
     monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
     monkeypatch.setattr(orchestrator, "remove_worktree", lambda *a, **kw: None)
 
@@ -468,3 +477,68 @@ def test_make_claude_agent_builds_command(monkeypatch):
     assert calls[0][:2] == ["claude", "-p"]
     assert "the prompt" in calls[0]
     assert "--foo" in calls[0]
+
+
+# ---------------------------------------------------------------------------
+# commit_worktree vor merge_back (Stage-2 Fix)
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_commit_before_merge_sequential(monkeypatch, tmp_path):
+    """Sequenzieller Pfad: commit_worktree VOR merge_back aufgerufen (Reihenfolge)."""
+    call_order = []
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_commit_worktree(worktree, message, **kwargs):
+        call_order.append("commit")
+        return True
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        call_order.append("merge")
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "commit_worktree", fake_commit_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", lambda *a, **kw: None)
+
+    result = run_workflow(
+        _workflow([_node("a")]),
+        agent=lambda node, prompt: None,
+        workspace=Workspace(repo_root=str(tmp_path)),
+    )
+    assert result.passed
+    assert call_order == ["commit", "merge"]
+
+
+def test_workspace_no_commit_on_red_gate_sequential(monkeypatch, tmp_path):
+    """Rotes Gate: commit_worktree und merge_back werden NICHT aufgerufen."""
+    commit_calls = []
+    merge_calls = []
+
+    def fake_create_worktree(repo_root, node_id, **kwargs):
+        return Worktree(path=str(tmp_path), branch=f"agent/{node_id}", base="HEAD")
+
+    def fake_commit_worktree(worktree, message, **kwargs):
+        commit_calls.append(worktree.branch)
+        return True
+
+    def fake_merge_back(repo_root, branch, base, **kwargs):
+        merge_calls.append(branch)
+        return MergeResult(merged=True, conflict=False, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(orchestrator, "commit_worktree", fake_commit_worktree)
+    monkeypatch.setattr(orchestrator, "merge_back", fake_merge_back)
+    monkeypatch.setattr(orchestrator, "remove_worktree", lambda *a, **kw: None)
+
+    result = run_workflow(
+        _workflow([_node("a", command="false")]),
+        agent=lambda node, prompt: None,
+        workspace=Workspace(repo_root=str(tmp_path)),
+    )
+    assert not result.passed
+    assert commit_calls == []
+    assert merge_calls == []

@@ -151,3 +151,32 @@ Format: DONE / MISTAKE / RULE je Eintrag.
 - **Kosten defensiv parsen**: `json.loads` + `data.get(...)` + isinstance-Check
   in try/except. CLI kann andere Felder liefern oder JSON weglassen -- nie annehmen,
   dass das Feld da ist.
+
+---
+
+## 2026-06-27 -- commit-before-merge Fix (Stage-2 worktree-Leaks)
+
+### DONE
+
+- `commit_worktree` in `src/sandbox.py` ergaenzt: staged + commit mit Headless-Identity
+  (user.name=aw-agent, user.email=aw-agent@local), runner-injizierbar fuer Tests.
+  Gibt True/False zurueck (Aenderung vorhanden ja/nein).
+- Beide Merge-Pfade in `src/orchestrator.py` angepasst: sequenziell (`_run_workspace_node`)
+  und parallel (`_run_workflow_waves`, innerhalb git_lock) rufen jetzt bei gruenem Gate
+  `commit_worktree` VOR `merge_back` auf.
+- 5 neue Tests; volle Suite: 145 Tests gruen (war 140).
+
+### MISTAKE
+
+- **Agent-Arbeit wurde nie committet**: `merge_back` mergte den Branch `agent/<id>`,
+  aber der Branch enthielt keine neuen Commits (nur untracked Files). Merge war
+  "Already up to date" -> in main landete nichts. Zweites Symptom: `remove_worktree`
+  ohne --force schlug fehl an den untracked Files -> "worktree erhalten"-Warnung.
+  Erst beim manuellen End-to-End-Check auf Hetzner entdeckt (hello.txt fehlte in main).
+
+### RULE
+
+- **Agent-Arbeit muss vor merge_back committet werden**: Ein worktree-Branch ohne eigene
+  Commits merged als "Already up to date" -- die Dateiaenderungen des Agents gehen beim
+  worktree-Remove verloren. Commit loest beide Probleme: Inhalt landet in main, worktree
+  wird sauber (remove ohne --force moeglich).

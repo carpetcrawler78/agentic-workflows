@@ -17,13 +17,13 @@ try:
     from .runner import topological_order, topological_waves
     from .executor import run_node, CheckResult, NodeResult
     from .export import render_node
-    from .sandbox import create_worktree, merge_back, remove_worktree
+    from .sandbox import create_worktree, commit_worktree, merge_back, remove_worktree
 except ImportError:
     from loader import validate_workflow, validate_workflow_file
     from runner import topological_order, topological_waves
     from executor import run_node, CheckResult, NodeResult
     from export import render_node
-    from sandbox import create_worktree, merge_back, remove_worktree
+    from sandbox import create_worktree, commit_worktree, merge_back, remove_worktree
 
 # (node, gerenderter_prompt) -> Optional[float] (Kosten in USD) oder None.
 # Wirft der Agent, gilt der Knoten als fehlgeschlagen.
@@ -162,6 +162,7 @@ def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failur
                 worktree = worktree_or_exc
                 if result.passed:
                     with git_lock:
+                        commit_worktree(worktree, f"agent: {nid}")
                         merge_back(workspace.repo_root, worktree.branch, "HEAD")
                         remove_worktree(workspace.repo_root, worktree)
                 all_runs.append(
@@ -188,9 +189,10 @@ def _run_workspace_node(node, prompt, agent, workspace, defaults):
         raise
     result = run_node(node, defaults, cwd_root=worktree.path)
     if result.passed:
+        commit_worktree(worktree, f"agent: {node['id']}")
         merge_back(workspace.repo_root, worktree.branch, "HEAD")
         remove_worktree(workspace.repo_root, worktree)
-    # Rotes Gate: worktree erhalten fuer Inspektion, kein merge.
+    # Rotes Gate: worktree erhalten fuer Inspektion, kein commit/merge.
     return result, cost
 
 

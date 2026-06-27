@@ -14,6 +14,7 @@ from sandbox import (
     ParseError,
     SandboxResult,
     Worktree,
+    commit_worktree,
     create_worktree,
     merge_back,
     parse_tagged_output,
@@ -505,6 +506,60 @@ def test_merge_back_abort_called_on_conflict(monkeypatch, tmp_path):
     assert result.merged is False
     abort_calls = [c for c in captured if "--abort" in c]
     assert len(abort_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# commit_worktree
+# ---------------------------------------------------------------------------
+
+
+def test_commit_worktree_staged_returns_true(monkeypatch):
+    """Staged Aenderung vorhanden -> commit-Aufruf erfolgt, gibt True zurueck."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        if "diff" in cmd and "--cached" in cmd:
+            return _ok(returncode=1)  # exit 1 = staged Aenderungen vorhanden
+        return _ok()
+
+    result = commit_worktree(_fake_worktree(), "agent: test-node", runner=fake_runner)
+    assert result is True
+    commit_cmds = [c for c in captured if "commit" in c]
+    assert len(commit_cmds) == 1
+
+
+def test_commit_worktree_nothing_staged_returns_false(monkeypatch):
+    """Nichts gestaged (diff --cached exit 0) -> kein commit, gibt False zurueck."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        return _ok(returncode=0)  # exit 0 = keine Aenderung
+
+    result = commit_worktree(_fake_worktree(), "agent: test-node", runner=fake_runner)
+    assert result is False
+    assert not any("commit" in c for c in captured)
+
+
+def test_commit_worktree_headless_identity(monkeypatch):
+    """Commit-Aufruf traegt user.name=aw-agent und user.email=aw-agent@local."""
+    _mock_which(monkeypatch)
+    captured = []
+
+    def fake_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        if "diff" in cmd and "--cached" in cmd:
+            return _ok(returncode=1)
+        return _ok()
+
+    commit_worktree(_fake_worktree(), "agent: node1", runner=fake_runner)
+    commit_cmd = next(c for c in captured if "commit" in c)
+    flat = " ".join(commit_cmd)
+    assert "user.name=aw-agent" in flat
+    assert "user.email=aw-agent@local" in flat
 
 
 def test_merge_back_no_abort_on_success(monkeypatch, tmp_path):
