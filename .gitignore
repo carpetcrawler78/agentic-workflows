@@ -37,3 +37,6 @@ npm-debug.log*
 
 # Stufe-2 Worktrees (temporaere git-Arbeitskopien pro Agent-Knoten)
 .aw-worktrees/
+
+# Run-Historie (SQLite, default-on -- s. docs/CC_PROMPT_run_history_log.md)
+.aw-runs/

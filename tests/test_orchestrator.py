@@ -15,6 +15,14 @@ from runner import topological_order
 from sandbox import MergeResult, Worktree
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Alle Tests hier rufen run_workflow ohne cwd_root auf (Default "."). Ohne diese
+    Isolation wuerde das default-on Run-Log echte .aw-runs/-Verzeichnisse im Repo-Root
+    anlegen. monkeypatch.chdir setzt den Prozess-cwd fuer die Testdauer auf tmp_path."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _node(node_id, command="true", exit_code=0):
     return {
         "id": node_id,

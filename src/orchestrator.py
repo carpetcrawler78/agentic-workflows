@@ -5,10 +5,13 @@ Claude-Code-Aufruf testbar bleibt."""
 
 import argparse
 import json
+import sqlite3
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -87,6 +90,86 @@ def _write_checkpoint(checkpoint_path, passed_node_ids):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump({"passed_node_ids": passed_node_ids}, f)
+
+
+# Sentinel: "nicht angegeben" -> <cwd_root>/.aw-runs/runs.sqlite3 verwenden.
+# None bedeutet dagegen "explizit deaktiviert" (z.B. --no-run-log).
+_RUN_LOG_DEFAULT = object()
+
+
+def _ensure_run_log_schema(conn):
+    """Legt die beiden Tabellen an, falls sie noch nicht existieren. Idempotent,
+    sicher bei jedem Aufruf ausfuehrbar."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS runs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "timestamp TEXT NOT NULL, "
+        "workflow_name TEXT NOT NULL, "
+        "passed INTEGER NOT NULL, "
+        "total_cost_usd REAL"
+        ")"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS node_runs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "run_id INTEGER NOT NULL REFERENCES runs(id), "
+        "node_id TEXT NOT NULL, "
+        "skipped INTEGER NOT NULL, "
+        "passed INTEGER NOT NULL, "
+        "cost_usd REAL"
+        ")"
+    )
+
+
+def _append_run_log(run_log_path, workflow_name, workflow_run):
+    """Schreibt einen abgeschlossenen Lauf in die SQLite-Run-Historie. Legt Datei und
+    Elternverzeichnis bei Bedarf an. Ein Fehlschlag beim Schreiben darf den Workflow-Lauf
+    NICHT crashen -- nur eine Warnung auf stderr, der Rueckgabewert von run_workflow bleibt
+    unveraendert. Warnt zusaetzlich auf stderr, wenn die Datei nach dem Schreiben > 10 MB
+    gross ist (keine automatische Rotation -- Thomas-Entscheidung 2026-07-10)."""
+    path = Path(run_log_path)
+    total_cost = sum(
+        r.cost_usd for r in workflow_run.runs if r.cost_usd is not None
+    )
+    total_cost = total_cost if any(r.cost_usd is not None for r in workflow_run.runs) else None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(path))
+        try:
+            _ensure_run_log_schema(conn)
+            cur = conn.execute(
+                "INSERT INTO runs (timestamp, workflow_name, passed, total_cost_usd) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    workflow_name,
+                    1 if workflow_run.passed else 0,
+                    total_cost,
+                ),
+            )
+            run_id = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO node_runs (run_id, node_id, skipped, passed, cost_usd) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    (run_id, r.node_id, 1 if r.skipped else 0, 1 if r.passed else 0, r.cost_usd)
+                    for r in workflow_run.runs
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        size_bytes = path.stat().st_size
+        if size_bytes > 10 * 1024 * 1024:
+            size_mb = size_bytes / (1024 * 1024)
+            print(
+                f"WARNUNG: Run-Log '{path}' ist {size_mb:.1f} MB gross (>10 MB). "
+                "Keine automatische Rotation -- bei Bedarf manuell aufraeumen/archivieren.",
+                file=sys.stderr,
+            )
+    except (OSError, sqlite3.Error) as exc:
+        print(f"WARNUNG: Run-Log konnte nicht geschrieben werden ({exc})", file=sys.stderr)
 
 
 def _run_one_node_for_wave(node_id, nodes_by_id, defaults, agent, workspace, git_lock):
@@ -196,7 +279,7 @@ def _run_workspace_node(node, prompt, agent, workspace, defaults):
     return result, cost
 
 
-def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1):
+def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1, run_log_path=_RUN_LOG_DEFAULT):
     """Validiert den Workflow, bestimmt die Topo-Reihenfolge und fuehrt pro Knoten
     den optionalen Agent-Schritt plus das acceptance-Gate aus. Bei Fehlschlag wird
     per Default gestoppt, die restlichen Knoten werden als skipped markiert.
@@ -205,7 +288,18 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
     (bestandene node-ids) dorthin geschrieben. Mit resume=True werden bereits darin
     vermerkte Knoten uebersprungen (skipped=True, agent_invoked=False, passed=True)
     und der Lauf setzt beim ersten offenen Knoten fort. Ohne checkpoint_path ist das
-    Verhalten exakt wie zuvor."""
+    Verhalten exakt wie zuvor.
+
+    run_log_path steuert die SQLite-Run-Historie: ohne Angabe (Default) wird
+    <cwd_root>/.aw-runs/runs.sqlite3 verwendet (default-on); explizit None deaktiviert
+    das Logging vollstaendig."""
+    if run_log_path is _RUN_LOG_DEFAULT:
+        resolved_run_log_path = Path(cwd_root) / ".aw-runs" / "runs.sqlite3"
+    elif run_log_path is None:
+        resolved_run_log_path = None
+    else:
+        resolved_run_log_path = Path(run_log_path)
+
     if workspace is not None and max_parallel > 1 and agent is not None:
         return _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failure)
 
@@ -283,10 +377,15 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
             _write_checkpoint(checkpoint_path, passed_node_ids)
 
     overall_passed = all(run.passed for run in runs)
-    return WorkflowRun(order=order, runs=runs, passed=overall_passed)
+    workflow_run = WorkflowRun(order=order, runs=runs, passed=overall_passed)
+
+    if resolved_run_log_path is not None:
+        _append_run_log(resolved_run_log_path, workflow.get("name", "?"), workflow_run)
+
+    return workflow_run
 
 
-def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1):
+def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, checkpoint_path=None, resume=False, workspace=None, max_parallel=1, run_log_path=_RUN_LOG_DEFAULT):
     """Liest+parst die Workflow-Datei (loader.validate_workflow_file) und ruft run_workflow."""
     workflow = validate_workflow_file(path)
     return run_workflow(
@@ -298,6 +397,7 @@ def run_workflow_file(path, agent=None, cwd_root=".", stop_on_failure=True, chec
         resume=resume,
         workspace=workspace,
         max_parallel=max_parallel,
+        run_log_path=run_log_path,
     )
 
 

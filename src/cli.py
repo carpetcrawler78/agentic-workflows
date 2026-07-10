@@ -36,6 +36,19 @@ def _cmd_export(args):
 
 
 def _cmd_run(args):
+    if args.resume and not args.checkpoint_path:
+        print("Fehler: --resume erfordert --checkpoint <PATH> (gleicher Pfad wie beim Lauf, "
+              "der fortgesetzt werden soll).", file=sys.stderr)
+        return 2
+
+    run_log_kwargs = {}
+    if args.no_run_log:
+        if args.run_log_path:
+            print("Hinweis: --no-run-log gesetzt, --run-log wird ignoriert.", file=sys.stderr)
+        run_log_kwargs["run_log_path"] = None
+    elif args.run_log_path:
+        run_log_kwargs["run_log_path"] = args.run_log_path
+
     agent = None
     workspace = None
 
@@ -57,8 +70,11 @@ def _cmd_run(args):
         agent=agent,
         cwd_root=args.cwd,
         stop_on_failure=not args.no_stop,
+        checkpoint_path=args.checkpoint_path,
+        resume=args.resume,
         workspace=workspace,
         max_parallel=args.max_parallel,
+        **run_log_kwargs,
     )
     _print_summary(workflow_run)
     return 0 if workflow_run.passed else 1
@@ -93,6 +109,24 @@ def main(argv=None):
     parser_run.add_argument("--memory", default="1.5g", help="Container-Memory-Limit (Default: 1.5g)")
     parser_run.add_argument("--max-parallel", type=int, default=1, metavar="N", dest="max_parallel",
                             help="Parallele Knoten (Default: 1; >1 noch nicht implementiert)")
+    parser_run.add_argument(
+        "--checkpoint", default=None, metavar="PATH", dest="checkpoint_path",
+        help="Pfad fuer Checkpoint-Datei (Fortschritt nach jedem Knoten). Ohne dieses Flag "
+             "kein Checkpoint, kein Resume moeglich.",
+    )
+    parser_run.add_argument(
+        "--resume", action="store_true",
+        help="Bereits im Checkpoint vermerkte Knoten ueberspringen und fortsetzen. "
+             "Erfordert --checkpoint (gleicher Pfad wie beim vorherigen Lauf).",
+    )
+    parser_run.add_argument(
+        "--run-log", default=None, metavar="PATH", dest="run_log_path",
+        help="Pfad fuer SQLite-Run-Historie (Default: <cwd>/.aw-runs/runs.sqlite3, automatisch aktiv)",
+    )
+    parser_run.add_argument(
+        "--no-run-log", action="store_true",
+        help="Run-Log deaktivieren (Default ist an)",
+    )
     parser_run.set_defaults(func=_cmd_run)
 
     args = parser.parse_args(argv)

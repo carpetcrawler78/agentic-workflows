@@ -180,3 +180,46 @@ Format: DONE / MISTAKE / RULE je Eintrag.
   Commits merged als "Already up to date" -- die Dateiaenderungen des Agents gehen beim
   worktree-Remove verloren. Commit loest beide Probleme: Inhalt landet in main, worktree
   wird sauber (remove ohne --force moeglich).
+
+---
+
+## 2026-07-10 -- Cowork-Audit-Nachtrag: Lock-Cleanup, Resume/Checkpoint-CLI, SQLite-Run-Log
+
+### DONE
+
+- **Teil 0**: verwaistes 0-Byte `.git/index.lock` entfernt (kein laufender git-Prozess,
+  vorher per `Get-Process` geprueft). `git status` danach sauber.
+- **Teil 1**: `--checkpoint PATH` / `--resume` als CLI-Flags in `src/cli.py` (`parser_run`,
+  `_cmd_run`) ergaenzt. Die Bibliotheksmechanik (`checkpoint_path`/`resume` in
+  `run_workflow`/`run_workflow_file`) existierte schon -- nur die CLI reichte sie nicht
+  durch. `--resume` ohne `--checkpoint` -> Exit-Code 2, kein teurer Lauf wird ausgeloest.
+- **Teil 2**: SQLite-Run-Historie in `src/orchestrator.py` (`_ensure_run_log_schema`,
+  `_append_run_log`), default-on ueber Sentinel `_RUN_LOG_DEFAULT` (Default-Pfad
+  `<cwd_root>/.aw-runs/runs.sqlite3`), Deaktivierung per `run_log_path=None` bzw.
+  CLI-Flag `--no-run-log`. Warnung auf stderr ab 10 MB Dateigroesse, keine Rotation.
+  Schreibfehler (`OSError`/`sqlite3.Error`) crashen den Lauf nicht, nur stderr-Warnung.
+  CLI-Flags `--run-log PATH` / `--no-run-log` ergaenzt (`--no-run-log` gewinnt bei
+  gleichzeitiger Angabe, mit Hinweis auf stderr). `.gitignore`: `.aw-runs/` ergaenzt.
+- 14 neue Tests (`tests/test_run_log.py`, `tests/test_cli.py` -- Letzteres neu angelegt,
+  gab es vorher nicht). `tests/test_orchestrator.py`: autouse-Fixture `_isolate_cwd`
+  (chdir auf `tmp_path`) ergaenzt, damit die ~20 bestehenden `run_workflow(...)`-Aufrufe
+  ohne explizites `cwd_root` (Default `"."`) durch das neue Default-on-Run-Log keine
+  echten `.aw-runs/`-Verzeichnisse im Repo-Root anlegen. Volle Suite: 159 Tests gruen
+  (war 145 -- 143 passed + 2 vorher OS-bedingt geskippte, hier auf Windows real gelaufen).
+
+### MISTAKE
+
+- Keine neuen Fehler in dieser Runde -- der Cowork-Audit hatte die drei Luecken bereits
+  praezise lokalisiert (Datei/Zeile), Umsetzung folgte dem vorbereiteten CC-Prompt 1:1.
+
+### RULE
+
+- **Default-on-Nebeneffekte zuerst in der Testsuite absichern, dann Feature bauen**:
+  Bevor ein `default=True`-Verhalten (hier: Run-Log) eingefuehrt wird, pruefen, ob
+  bestehende Tests denselben Code-Pfad mit dem alten (impliziten) Default aufrufen --
+  sonst schreiben Tests unbemerkt echte Artefakte ins Repo. Eine einzelne autouse-Fixture
+  (`monkeypatch.chdir`) ist hier guenstiger als 20 Einzel-Edits mit `run_log_path=None`.
+- **Sentinel-Objekt statt `None`-Ueberladung fuer "nicht angegeben" vs. "explizit aus"**:
+  `None` kann nur einen Zustand codieren. Ein Modul-Sentinel (`_RUN_LOG_DEFAULT = object()`)
+  trennt "Default verwenden" von "Feature deaktiviert" sauber, ohne Sonderwert wie `-1`
+  oder einen zusaetzlichen Bool-Parameter.
