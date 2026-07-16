@@ -130,6 +130,38 @@ def test_order_follows_topological_order_not_nodes_array():
     assert result.order == topological_order(workflow)
 
 
+def test_local_model_node_skips_agent():
+    # model:local -> Agent-Schritt wird uebersprungen, das Gate laeuft trotzdem.
+    node = _node("a")
+    node["model"] = "local"
+    workflow = _workflow([node])
+    calls = []
+
+    result = run_workflow(workflow, agent=lambda n, p: calls.append(n["id"]))
+
+    assert calls == []                          # Agent NICHT aufgerufen (kein Bill)
+    assert result.runs[0].agent_invoked is False
+    assert result.runs[0].result is not None    # Gate lief trotzdem
+    assert result.passed
+
+
+def test_defaults_local_skips_agent_but_sonnet_override_runs():
+    # defaults.model=local; ein Knoten ueberschreibt auf sonnet -> nur der ruft den Agent.
+    local_node = _node("a")
+    sonnet_node = _node("b")
+    sonnet_node["model"] = "sonnet"
+    workflow = _workflow([local_node, sonnet_node], [{"from": "a", "to": "b"}])
+    workflow["defaults"] = {"model": "local"}
+    calls = []
+
+    result = run_workflow(workflow, agent=lambda n, p: calls.append(n["id"]))
+
+    assert calls == ["b"]                        # nur der sonnet-Knoten billt
+    assert result.runs[0].agent_invoked is False
+    assert result.runs[1].agent_invoked is True
+    assert result.passed
+
+
 def test_invalid_workflow_raises_validation_error():
     workflow = {"version": "1", "name": "Invalid", "nodes": [{"id": "a", "goal": "x"}], "edges": []}
     with pytest.raises(WorkflowValidationError):
@@ -470,7 +502,7 @@ def test_make_claude_agent_builds_command(monkeypatch):
     calls = []
 
     def fake_run(command, **kwargs):
-        calls.append(command)
+        calls.append((command, kwargs))
 
         class FakeCompleted:
             returncode = 0
@@ -482,9 +514,13 @@ def test_make_claude_agent_builds_command(monkeypatch):
     agent = make_claude_agent(extra_args=["--foo"])
     agent({"id": "a"}, "the prompt")
 
-    assert calls[0][:2] == ["claude", "-p"]
-    assert "the prompt" in calls[0]
-    assert "--foo" in calls[0]
+    command, kwargs = calls[0]
+    assert command[:2] == ["claude", "-p"]
+    # Prompt geht ueber stdin, nicht als argv (sonst deutet der CLI-Parser ein
+    # fuehrendes '-'/'---' als Option und bricht mit "unknown option" ab).
+    assert kwargs.get("input") == "the prompt"
+    assert "the prompt" not in command
+    assert "--foo" in command
 
 
 # ---------------------------------------------------------------------------

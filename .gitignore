@@ -40,3 +40,6 @@ npm-debug.log*
 
 # Run-Historie (SQLite, default-on -- s. docs/CC_PROMPT_run_history_log.md)
 .aw-runs/
+
+# Python packaging build artefact (entsteht durch 'pip install -e .')
+*.egg-info/

@@ -194,7 +194,30 @@ def _run_one_node_for_wave(node_id, nodes_by_id, defaults, agent, workspace, git
     return node_id, result, worktree, cost
 
 
+def _effective_model(node, defaults):
+    """Effektives Modell: Knoten ueberschreibt defaults, defaults ueberschreibt Schema-Default."""
+    if node.get("model") is not None:
+        return node["model"]
+    if defaults.get("model") is not None:
+        return defaults["model"]
+    return "sonnet"
+
+
+def _uses_agent(node, defaults):
+    """True, wenn dieser Knoten den (kostenpflichtigen) API-Agent-Schritt braucht.
+
+    model == 'local' markiert deterministische/triviale Knoten (Skript-Arbeit, per
+    acceptance-Kommando verifiziert). Fuer die ist kein API-Agent noetig -- der Runner
+    ueberspringt den Agent-Schritt, das Gate erledigt bzw. prueft die Arbeit. Damit
+    greift das Kosten-Routing: --execute billt nur noch bei echten Agent-Knoten
+    (model sonnet/planner). Sobald ein lokaler Worker angebunden ist, hier statt
+    Skip auf den lokalen Agent routen."""
+    return _effective_model(node, defaults) != "local"
+
+
 def _run_workflow_waves(workflow, agent, workspace, max_parallel, stop_on_failure):
+    # TODO: sobald max_parallel>1 implementiert ist, hier ebenfalls _uses_agent(node,
+    # defaults) respektieren, damit local-Knoten auch im Parallel-Pfad keinen Agent billen.
     """Parallele Workflow-Ausfuehrung ueber topological_waves + ThreadPoolExecutor.
 
     Innerhalb jeder Welle laufen Knoten nebenlaeufig (max_workers=max_parallel).
@@ -331,7 +354,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
         agent_invoked = False
         cost = None
 
-        if workspace is not None and agent is not None:
+        if workspace is not None and agent is not None and _uses_agent(node, defaults):
             # Workspace-Modus: worktree -> agent im Container -> Gate -> merge/keep.
             prompt = render_node(node, defaults)
             agent_invoked = True
@@ -348,7 +371,7 @@ def run_workflow(workflow, agent=None, cwd_root=".", stop_on_failure=True, check
                     _write_checkpoint(checkpoint_path, passed_node_ids)
                 continue
         else:
-            if agent is not None:
+            if agent is not None and _uses_agent(node, defaults):
                 prompt = render_node(node, defaults)
                 agent_invoked = True
                 try:
@@ -407,12 +430,16 @@ def make_claude_agent(extra_args=None):
     Wird NICHT mit echtem Claude Code unit-getestet -- nur die Kommando-Konstruktion.
 
     HINWEIS: das Flag '-p' fuer Headless-Prompt-Uebergabe ist defensiv gewaehlt und
-    muss ggf. an die installierte Claude-Code-CLI-Version angepasst werden."""
+    muss ggf. an die installierte Claude-Code-CLI-Version angepasst werden.
+
+    Der Prompt wird ueber stdin gereicht, nicht als argv-Argument. Sonst deutet der
+    CLI-Parser einen Prompt, der mit '-' oder '---' beginnt (z.B. YAML-Frontmatter
+    eines gerenderten Knotens), als unbekannte Option und bricht ab."""
     extra_args = extra_args or []
 
     def agent(node, prompt):
-        command = ["claude", "-p", prompt] + list(extra_args)
-        subprocess.run(command, check=True)
+        command = ["claude", "-p"] + list(extra_args)
+        subprocess.run(command, input=prompt, text=True, check=True)
 
     return agent
 
