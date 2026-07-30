@@ -1,63 +1,129 @@
 # agentic-workflows
 
-Visuelles Tool zum Bauen und Kommentieren von Dev-Workflows, die anschließend von Claude Code (oder kompatiblen Agenten) Schritt für Schritt ausgeführt werden.
+A visual tool for building and annotating dev workflows, which are then executed step by step by Claude Code (or compatible agents).
 
-## Idee in einem Satz
+## The idea in one sentence
 
-Workflow als DAG zeichnen → pro Node strukturierte Slots (Ziel, Inputs, Constraints, Acceptance, Kommentare) ausfüllen → Tool generiert daraus Slash-Commands / Sub-Agent-Definitionen für Claude Code.
+Draw a workflow as a DAG → fill in structured slots per node (goal, inputs, constraints, acceptance, comments) → the tool generates slash commands / sub-agent definitions for Claude Code from it.
 
-## Status
+**Quick primer, in case these terms are new:** A **DAG** ("Directed Acyclic Graph") is just a flowchart with arrows that never loop back — e.g. "Setup" → "Write tests" → "Build feature" → "Run tests". Each box in that diagram is called a **node** here, each arrow an **edge**. The tool lets you draw such a graph visually and then turns it into files an AI coding agent (currently Claude Code) can work through on its own.
 
-Stufe 1 **und** Stufe 2 funktionsfähig (Stand 2026-06-27). Engine komplett und getestet
-(loader → export → runner → executor → orchestrator → cli), Beispiel-Workflow läuft
-end-to-end durchs acceptance-Gate. UI gebaut (`ui/canvas.html`, Single-File, Zero-Deps).
-Dogfooding live über `meta-workflow.json`.
+## Why this exists (the problem being solved)
 
-Stufe 2 (Sandbox-Backend: docker + git-worktree pro Knoten) ist **end-to-end auf Hetzner
-verifiziert**: Isolation im Container, acceptance-Gate, `commit_worktree` vor `merge_back`
-(Agent-Arbeit landet via `--no-ff`-Merge in `main`), idempotentes `create_worktree` und
-Kosten-Tracking (`total_cost_usd` im Run-Summary). Aufruf: `… run <wf>.json --sandbox`.
-Details: `docs/PROJECT_OVERVIEW.md`, `docs/DECISION_backend.md`, `docs/STAGE2_RUNBOOK.md`.
+When you ask an AI agent to "build feature X", you often get usable but *unverified* code back — the agent *claims* it works, but nobody has actually checked. On multi-step tasks (first a database migration, then business logic, then tests, then deploy), this gets messy and risky fast.
 
-Erster realer Nicht-Dev-Konsument (der „Allgemeinheits-Beweis"): **job-search-system**
-(eigenes Repo). Beziehung + Cross-Reference-Konvention siehe `CLAUDE.md` →
-„Externe Konsumenten / Zwei-Repo-Beziehung".
+The idea here: write the workflow down explicitly as a graph, and attach an **automatically checkable definition of done** to every step (e.g. "pytest must pass", "this curl call must return status 200"). Only once that check passes does the step count as complete and the next one is allowed to start. That turns "the agent claims it's done" into "the system verified it."
 
-## Offene Designfragen
+## Architecture
 
-1. **Granularität pro Node** — ein Node = ein Slash-Command (klein, viele Nodes) vs. ein Node = ein ganzer Sub-Agent (groß, wenige Nodes).
-   **Entschieden (2026-07-10):** groß — ein Node = ein Sub-Agent. Begründung folgt aus Entscheidung 2 (Stufe 2): ein autonom laufender Master-Agent profitiert von wenigen, in sich geschlossenen Agent-Nodes statt vieler feinkörniger Slash-Command-Schritte, die einzeln orchestriert werden müssten. Kleine Slash-Command-Nodes bleiben als Exportformat (`kind: command`) für Stufe-1-Fälle weiter möglich, sind aber nicht mehr die Standardgranularität.
-2. **Execution-Modell** — Stufe 1 (Canvas als Design-Tool, Mensch orchestriert) vs. Stufe 2 (Master-Agent liest Graph und arbeitet ihn ab). Reifestufen, kein Entweder-oder; beide existieren in der Engine.
-   **Entschieden (2026-07-10):** Stufe 2 (Master-Agent orchestriert autonom) ist das primäre Execution-Modell. Stufe 1 bleibt als Design-/Debug-Ansicht im Canvas erhalten (Workflow bauen, einzelne Nodes manuell testen), ist aber nicht mehr der Regelbetrieb.
-3. **Persistenz** — Workflow-JSON im Repo (git-versioniert, PR-fähig) vs. nur im Cowork-Artifact.
-   **Entschieden (2026-07-10, von Thomas bestätigt):** "Im Repo" ist bereits die etablierte professionelle Methode für Workflow-als-Code — dasselbe Muster wie GitHub-Actions-Workflows (`.github/workflows/*.yml`), Airflow-DAGs oder Temporal-Workflow-Definitionen: Definition versioniert in Git, diff-/PR-fähig, Schema-validiert (`schema/workflow.schema.json`, bereits vorhanden). Eine schwergewichtige Workflow-Orchestrierungsplattform (Airflow/Prefect/Dagster/Temporal) wäre kein "professionellerer" Ersatz, sondern ein Bruch mit der eigenen Konvention (`CLAUDE.md`: Single-File bevorzugt, keine neuen Dependencies ohne Begründung) und für ein Solo-/Dogfooding-Tool überdimensioniert.
-   Die eigentliche Lücke liegt woanders: aktuell wird **nur die Definition** persistiert, nicht die **Ausführungshistorie**. `total_cost_usd` u. a. Run-Daten werden im Sandbox-Agent zur Laufzeit geparst (`src/sandbox_agent.py`), aber nirgends dauerhaft abgelegt — nach dem Run sind sie weg. Professionalisierungsschritt wäre, Definition (Git) und Run-Historie (Zustand/Kosten/Logs pro Lauf) sauber zu trennen, z. B. ein append-only Run-Log (JSONL) oder eine leichte SQLite-Datei unter einem eigenen, ggf. gitignorten Verzeichnis (`runs/`) — kein neuer Fremd-Dependency, passt zur bestehenden Konvention. Das ist die naheliegende "professionellere Methode", nicht ein Wechsel weg von Git für die Definition selbst.
-   **Umsetzung als Claude-Code-Auftrag vorbereitet:** `docs/CC_PROMPT_run_history_log.md` — noch nicht ausgeführt. **Finale Entscheidungen (2026-07-10, später am Tag):** SQLite statt JSONL (stdlib `sqlite3`, keine neue Dependency); keine Größenbegrenzung/Rotation, aber Warnung auf stderr sobald die Datei >10 MB ist; `run` loggt **standardmäßig** (default-on, Default-Pfad `.aw-runs/runs.sqlite3` relativ zu `--cwd`), Deaktivierung über `--no-run-log`.
-   **Erweitert (2026-07-10, Cowork-Audit):** derselbe Claude-Code-Auftrag deckt jetzt zusätzlich zwei weitere Vor-Echtbetrieb-Lücken ab, die beim Real-Files-Audit gefunden wurden — Teil 0: ein verwaistes `.git/index.lock` bereinigen; Teil 1: `--checkpoint`/`--resume` als CLI-Flags nachrüsten (die Library (`run_workflow`) unterstützt beides bereits, nur die CLI reicht es noch nicht durch — bislang nur in `job-search-system/CLAUDE.md` als bekannte Lücke dokumentiert, nicht hier).
-   **Umgesetzt (2026-07-10, Cowork-Audit-Nachtrag ausgeführt):** Run-Log implementiert als SQLite (`src/orchestrator.py`, `_append_run_log`), default-on unter `.aw-runs/runs.sqlite3` relativ zu `--cwd`, Warnung auf stderr ab 10 MB, keine automatische Rotation; Deaktivierung über `--no-run-log` bzw. `run_log_path=None`. `--checkpoint PATH` / `--resume` sind jetzt ebenfalls als CLI-Flags verfügbar (`src/cli.py`), nicht mehr nur Library-intern. Details/Tests: `docs/CC_PROMPT_run_history_log.md`, `docs/DEVLOG.md` (Eintrag 2026-07-10).
-4. **Backend für Stufe 2** — entschieden (`docs/DECISION_backend.md`): Python-Primitive nachbauen statt sandcastle portieren; Worker = API-Modell; OpenClaw nur als optionaler Stufe-3-Trigger.
+The project has two parts that work together: the **engine** (Python, does the actual work) and the **canvas UI** (a single HTML file for visually building workflows).
 
-## Datenmodell
+### 1. The processing pipeline
 
-Ein Workflow ist eine JSON-Datei, die gegen `schema/workflow.schema.json` (JSON-Schema Draft 2020-12) validiert. Die Validierung läuft über `validate_workflow()` / `validate_workflow_file()` in `src/loader.py` und sammelt **alle** Verstöße auf einmal in einer `WorkflowValidationError` (Feld `.issues`), statt beim ersten abzubrechen.
+A workflow always passes through the same stations before it runs:
 
-Auf oberster Ebene hat ein Workflow `version` (`"1"`), `name`, optional `description`, optional `defaults` sowie die beiden Kernfelder `nodes[]` und `edges[]`.
+```mermaid
+flowchart LR
+    A["workflow.json"] --> B["loader\n(validates against schema)"]
+    B --> C["export\n(generates .md files)"]
+    B --> D["runner\n(prepares execution)"]
+    D --> E["executor\n(runs a single node)"]
+    E --> F["orchestrator\n(controls order via the DAG)"]
+    F --> G["cli\n(command-line entry point)"]
 
-Ein **Node** ist ein verifizierbar abschließbarer Task. Pflichtfelder sind `id` (kebab-case, dient zugleich als Export-Dateiname), `goal` (wird zur Prompt-Grundlage) und `acceptance` (mindestens ein Check). Optional kommen `title`, `inputs[]`, `constraints[]`, `comments`, `model` (`planner` | `sonnet` | `local` — Kosten-Routing) und `kind` (`command` | `agent` — Export-Granularität) hinzu.
+    style A fill:#e8f0fe,stroke:#4285f4
+    style G fill:#e6f4ea,stroke:#34a853
+```
 
-Eine **Edge** ist eine gerichtete Abhängigkeit mit `from` und `to` (beides Node-IDs) und optionalem `label`: `from` muss fertig sein, bevor `to` startet. Die Kanten spannen so den DAG auf.
+- **loader** — reads the JSON file and validates it against a fixed schema (more on that below). If it finds errors, it collects *all* of them at once instead of stopping at the first — saves a lot of debugging pain.
+- **export** — the "stage 1" path: the graph is turned into ready-made Claude Code files (slash commands, sub-agents) that a human then triggers manually.
+- **runner / executor / orchestrator** — the "stage 2" path: the engine executes the graph *itself*, node by node, in the correct order (the `orchestrator` knows the DAG and tracks what's waiting on what).
+- **cli** — the actual command you type, e.g. `agentic-workflows run workflow.json --sandbox`.
 
-### Acceptance-Check
+### 2. A workflow is a graph
 
-Der `acceptance`-Block ist der Hebel, der autonome Ausführung überhaupt ermöglicht: ein Node gilt nur dann als fertig, wenn **alle** seine Checks bestehen. Ein Check ist ein Shell-Kommando plus erwartetes Ergebnis:
+Here's what an example graph looks like (arrows = "must be done first"):
 
-- `command` — das auszuführende Kommando (deterministisch, ohne Seiteneffekte außerhalb des Repos).
-- `expect` — was zutreffen muss; mehrere Bedingungen sind UND-verknüpft. Möglich sind `exitCode`, `stdoutMatches`, `stdoutNotMatches` und `stderrMatches` (Regex/ECMA).
-- optional `description`, `cwd`, `timeoutSeconds` (Default 120).
+```mermaid
+flowchart TD
+    A["setup-project"] --> B["write-tests"]
+    A --> C["implement-feature"]
+    B --> D["run-tests"]
+    C --> D
+    D --> E["merge-to-main"]
 
-Kleiner Node = ein Check, großer Node = mehrere.
+    style A fill:#e8f0fe,stroke:#4285f4
+    style E fill:#e6f4ea,stroke:#34a853
+```
 
-### Minimalbeispiel
+`write-tests` and `implement-feature` can run in parallel (both only depend on `setup-project`), but `run-tests` only starts once *both* are done. That's the point of a DAG: it makes dependencies and parallelizability explicit instead of hiding them in a to-do list.
+
+### 3. How a single node gets executed (stage 2 / sandbox)
+
+So that an autonomously running agent can't accidentally break the main project, every node runs in isolation:
+
+```mermaid
+flowchart TD
+    N["Node's turn in the DAG"] --> W["create a git worktree\n(own working folder, own branch)"]
+    W --> D["Docker container starts\n(isolated environment)"]
+    D --> AG["Agent works on the task"]
+    AG --> AC{"Acceptance check\npasses?"}
+    AC -- No --> AG
+    AC -- Yes --> CM["commit_worktree\n(result gets committed)"]
+    CM --> MB["merge_back\n(--no-ff merge into main)"]
+
+    style AC fill:#fff3cd,stroke:#d9a441
+    style MB fill:#e6f4ea,stroke:#34a853
+```
+
+Two terms worth explaining here:
+
+- **Docker container** — a lightweight, isolated "mini-environment" the agent works in. If something goes wrong, it's contained there and doesn't damage the rest of the machine.
+- **git worktree** — a second, parallel working folder of the same git repo, on its own branch. This lets a node work on its own branch without multiple concurrently running nodes overwriting each other's files. Only after the check passes does the result get merged (`--no-ff`, i.e. with a visible merge commit instead of a clean "fast-forward") back into `main`.
+
+Along the way, each run's cost is tracked (`total_cost_usd`), and the result lands in a small SQLite database (`.aw-runs/runs.sqlite3`) — so a history is kept even though the workflow definition itself (the JSON file) stays unchanged in the git repo.
+
+### 4. Two maturity levels that coexist
+
+| | Stage 1 | Stage 2 |
+|---|---|---|
+| Who orchestrates? | A human, in the canvas | A master agent, autonomously |
+| Output | `.md` files to trigger manually | A directly executed run with log + cost |
+| Use case | Designing workflows, testing individual nodes | Standard operation for larger workflows |
+| CLI | `... export workflow.json` | `... run workflow.json --sandbox` |
+
+Both are fully implemented; stage 2 is now the primary mode, stage 1 remains as a design/debug tool.
+
+## Data model
+
+A workflow is a JSON file validated against `schema/workflow.schema.json` (**JSON Schema** is a standard for specifying which fields a JSON file must/may have — like a form with required fields). Validation collects all violations at once instead of stopping at the first error.
+
+At the top level, a workflow has `version`, `name`, optionally `description`, optionally `defaults`, plus the two core fields `nodes[]` and `edges[]`.
+
+A **node** is a verifiably completable task:
+
+| Field | Required? | Meaning |
+|---|---|---|
+| `id` | yes | kebab-case name, also used as the export filename |
+| `goal` | yes | becomes the basis of the prompt the agent receives |
+| `acceptance` | yes | at least one check (see below) |
+| `title`, `inputs[]`, `constraints[]`, `comments` | optional | extra context for the agent |
+| `model` | optional | `planner` \| `sonnet` \| `local` — controls which model (and thus what cost) is used for this node |
+| `kind` | optional | `command` \| `agent` — determines the export format |
+
+An **edge** is a directed dependency with `from` and `to` (both node IDs) and an optional `label`: `from` must be done before `to` starts. The edges are what span the DAG (see diagram above).
+
+### Acceptance check — the most important building block
+
+The `acceptance` block is what makes autonomous execution safe in the first place: a node only counts as done once **all** of its checks pass. A check is a shell command plus an expected result — essentially an automatic verifier that looks after every step instead of taking the agent's word for it.
+
+- `command` — the command to run (deterministic, no side effects outside the repo)
+- `expect` — what must hold true; multiple conditions are AND-combined: `exitCode`, `stdoutMatches`, `stdoutNotMatches`, `stderrMatches` (regular expressions)
+- optional: `description`, `cwd`, `timeoutSeconds` (default 120)
+
+Rule of thumb: a small node has one check, a large node has several.
+
+### Minimal example
 
 ```json
 {
@@ -66,10 +132,10 @@ Kleiner Node = ein Check, großer Node = mehrere.
   "nodes": [
     {
       "id": "run-tests",
-      "goal": "Test-Suite ausführen und sicherstellen, dass sie grün ist.",
+      "goal": "Run the test suite and make sure it's green.",
       "acceptance": [
         {
-          "description": "Alle Tests grün",
+          "description": "All tests pass",
           "command": "pytest -q",
           "expect": { "exitCode": 0 }
         }
@@ -80,10 +146,29 @@ Kleiner Node = ein Check, großer Node = mehrere.
 }
 ```
 
-Ein vollständigeres Beispiel mit Modell-Routing, mehreren Checks und DAG-Kanten liegt in `examples/example-workflow.json`.
+A more complete example with model routing, multiple checks, and DAG edges lives in `examples/example-workflow.json`.
 
-## Export-Targets
+## Export targets
 
-- `.claude/commands/<node-id>.md` — Slash-Commands, ein File pro Node
-- `.claude/agents/<node-id>.md` — Sub-Agent-Definitionen
-- `WORKFLOW.md` — Mermaid + alle Prompts inline als Single-File-Spec
+Depending on `kind`, the `export` step produces different files:
+
+- `.claude/commands/<node-id>.md` — slash commands, one file per node
+- `.claude/agents/<node-id>.md` — sub-agent definitions
+- `WORKFLOW.md` — a Mermaid diagram of the graph plus all prompts inline, as a readable single-file overview
+
+## Status
+
+The engine and CLI are fully implemented and tested (loader → export → runner → executor → orchestrator → cli), including end-to-end verification on a real server (sandbox backend: Docker + git worktree per node, including cost tracking and merge flow). The UI (`ui/canvas.html`) is a single HTML file with no external dependencies.
+
+A separate project (`job-search-system`) already consumes this engine as a dependency — proof that this is a generic tool rather than a one-off solution to a single problem.
+
+## Glossary (quick reference)
+
+- **DAG** — Directed Acyclic Graph: a flowchart with no loops back. Defines what waits on what.
+- **JSON Schema** — a rulebook defining which fields a JSON file must/may have.
+- **Node** — a single step/task in the workflow graph.
+- **Edge** — a dependency between two nodes ("A must finish before B").
+- **Acceptance check** — an automatically runnable command that verifies a node is actually done.
+- **Sandbox** — an isolated environment (here: Docker container + its own git branch) where an agent can work safely.
+- **git worktree** — an additional, parallel working folder of the same repo, on its own branch.
+- **`--no-ff` merge** — a git merge that always creates a visible merge commit instead of cleanly "fast-forwarding" history. Useful for seeing which changes belong together as a block in the log.
