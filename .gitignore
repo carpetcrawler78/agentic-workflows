@@ -47,3 +47,13 @@ npm-debug.log*
 # Local working notes / build prompts (kept locally, not published)
 CLAUDE.md
 docs/CC_PROMPT_*.md
+
+# Local AI assistant / agent files (not published)
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+**/CC_PROMPT_*.md
+*settings.local.json
+.agents/
+.lovable/

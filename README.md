@@ -162,6 +162,10 @@ Prototype. Engine and CLI (loader → export → runner → executor → orchest
 
 It is also used as a dependency in a private follow-up project.
 
+## How this was built
+
+The code was written with Claude Code, one task prompt with executable acceptance checks per building block. Working method, order of the building blocks and a shortened example prompt: [`docs/how-this-was-built.md`](docs/how-this-was-built.md).
+
 ## Glossary (quick reference)
 
 - **DAG** — Directed Acyclic Graph: a flowchart with no loops back. Defines what waits on what.
