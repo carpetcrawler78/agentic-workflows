@@ -136,7 +136,7 @@ Executor-Shell-Fix und UI-Polish sind erledigt (2026-06-22). Der nächste große
 
 1. **Stufe-2-Backend bauen** — Python-Primitive für isolierte Slaves (git-worktree +
    docker-sandbox + merge-back + strukturierter Output) plus Master-Scheduler mit Gating.
-   Sequenziell zuerst. Auftrag: `docs/CC_PROMPT_stage2_executor_backend.md`,
+   Sequenziell zuerst. Auftrag: `docs/CC_PROMPT_stage2_executor_backend.md` (lokal, nicht veröffentlicht),
    Begründung/Constraints: `docs/DECISION_backend.md`.
 2. **Kleinkram** — uncommitted UI-Polish einchecken, `tomllib`-Fallback (Python < 3.11),
    README von „Konzeptphase" auf realen Stand, nicht-Dev-Workflow als Allgemeinheits-Beweis.
@@ -152,8 +152,8 @@ Executor-Shell-Fix und UI-Polish sind erledigt (2026-06-22). Der nächste große
 | `schema/workflow.schema.json` | Datenmodell — Source of Truth |
 | `ui/canvas.html` | Single-File-Canvas-UI: laden, editieren, validieren, exportieren (Browser) |
 | `meta-workflow.json` | eigene Roadmap als ausführbarer Workflow (Dogfooding) |
-| `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Build-Historie) |
+| `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Build-Historie; lokal, nicht veröffentlicht) |
 | `docs/notes_2026-05-31_execution-und-kosten.md` | Execution-Stufen, Kosten-Routing, OpenClaw |
 | `docs/sandcastle-master-slave-analysis.md` | sandcastle als Stufe-2-Backend, Master/Slave |
 | `docs/DECISION_backend.md` | Backend-Entscheidung Stufe 2 (Optionen-Matrix, kein Port, Worker=API, Hetzner-Kapazität, OpenClaw als Stufe-3-Trigger) |
-| `docs/CC_PROMPT_stage2_executor_backend.md` | Bau-Auftrag für den Stufe-2-Sandbox-Backend |
+| `docs/CC_PROMPT_stage2_executor_backend.md` | Bau-Auftrag für den Stufe-2-Sandbox-Backend (lokal, nicht veröffentlicht) |

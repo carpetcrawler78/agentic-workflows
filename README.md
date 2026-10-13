@@ -92,7 +92,7 @@ Along the way, each run's cost is tracked (`total_cost_usd`), and the result lan
 | Use case | Designing workflows, testing individual nodes | Standard operation for larger workflows |
 | CLI | `... export workflow.json` | `... run workflow.json --sandbox` |
 
-Both are fully implemented; stage 2 is now the primary mode, stage 1 remains as a design/debug tool.
+Both are implemented; stage 2 is the primary mode, stage 1 remains as a design/debug tool.
 
 ## Data model
 
@@ -158,9 +158,9 @@ Depending on `kind`, the `export` step produces different files:
 
 ## Status
 
-The engine and CLI are fully implemented and tested (loader → export → runner → executor → orchestrator → cli), including end-to-end verification on a real server (sandbox backend: Docker + git worktree per node, including cost tracking and merge flow). The UI (`ui/canvas.html`) is a single HTML file with no external dependencies.
+Prototype. Engine and CLI (loader → export → runner → executor → orchestrator → cli) are covered by 161 tests; the sandbox run (Docker + git worktree per node, merge back) was tested on one server. The UI (`ui/canvas.html`) is a single HTML file with no external dependencies.
 
-A separate project (`job-search-system`) already consumes this engine as a dependency — proof that this is a generic tool rather than a one-off solution to a single problem.
+It is also used as a dependency in a private follow-up project.
 
 ## Glossary (quick reference)
 

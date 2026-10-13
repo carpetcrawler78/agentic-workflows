@@ -12,6 +12,7 @@ umgesetzt, und zwar nach diesem festen Ablauf:
 
 1. Pro Baustein wird eine Prompt-Datei `docs/CC_PROMPT_<thema>.md` angelegt (Aufgabe,
    API-Vertrag, Tests, **ausführbare Acceptance-Checks**, Constraints, Out-of-scope).
+   Diese Prompt-Dateien sind lokale Arbeitsdateien und nicht im öffentlichen Repo enthalten.
 2. Diese Datei wird in **Claude Code** ausgeführt — dort entsteht der eigentliche Code.
    Im Cowork-Chat wird der Code NICHT direkt geschrieben (bewusste Trennung; siehe Memory
    `build-via-cc-prompts`).
@@ -36,7 +37,7 @@ Design-Time → Runtime, als Kette:
 
 ## Chronik der Knoten
 
-Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` gebaut.
+Reihenfolge entspricht der Bau-Reihenfolge. Alle über `docs/CC_PROMPT_*.md` gebaut (lokal, nicht veröffentlicht).
 
 1. **implement-validator + test-validator** (`CC_PROMPT_validate_workflow.md`) — `loader.py`,
    8 Tests. Validierung sammelt alle Verstöße statt beim ersten zu stoppen.
@@ -157,7 +158,7 @@ Vorbefund: 17/58 Tests rot (WSL-Bash-Stub). Behoben als Pre-Phase-Commit vor Pha
 
 1. **Push:** `git push origin main` (lokal ahead).
 2. **Hetzner-Smoke:** `docs/STAGE2_RUNBOOK.md` Schritt fuer Schritt per SSH (capstone2,
-   cap@<server>): prune -> reboot -> pull -> `docker build` -> `python -m src.cli run
+   <user>@<server>): prune -> reboot -> pull -> `docker build` -> `python -m src.cli run
    examples/smoke-stage2.json --sandbox --image aw-sandbox:dev --memory 1.5g`. Box: 4 Cores,
    7,6 GiB RAM, 19 GB Disk frei, KEINE GPU.
 3. **Review-Fixes Teil A/B/C** (`docs/CC_PROMPT_stage2_review_fixes.md`; Teil 0 erledigt):
@@ -177,7 +178,7 @@ Vorbefund: 17/58 Tests rot (WSL-Bash-Stub). Behoben als Pre-Phase-Commit vor Pha
 | `docs/PROJECT_OVERVIEW.md` | Scope, Warum, Reifestufen, Kosten-Routing, Backend-Kandidaten |
 | `docs/DECISION_backend.md` | Backend-Entscheidung Stufe 2 (Matrix, kein Port, Worker=API, Hetzner-Kapazität, OpenClaw=Stufe-3-Trigger) |
 | `docs/concept.md` | Gesamtkonzept (vom `docs-concept`-Knoten erzeugt) |
-| `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Quelle der Build-Historie) |
+| `docs/CC_PROMPT_*.md` | je ein Bau-Auftrag pro Knoten (Quelle der Build-Historie; lokal, nicht veröffentlicht) |
 | `schema/workflow.schema.json` | Datenmodell (Source of Truth) |
 | `ui/canvas.html` | Single-File-Canvas-UI (laden/editieren/validieren/exportieren im Browser) |
 | `meta-workflow.json` | die eigene Roadmap als ausführbarer Workflow (Dogfooding) |
